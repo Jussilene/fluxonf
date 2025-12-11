@@ -1,0 +1,16 @@
+{
+  "name": "ia-nf-center-pro",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.19.0",
+    "playwright": "^1.57.0"
+  }
+}
