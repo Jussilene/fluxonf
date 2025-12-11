@@ -19,6 +19,16 @@ const users = [
     displayName: "teste",
     role: "user",
   },
+  {
+  email: "ronaldo.teste@empresa.com",
+  password: "123456",
+  displayName: "Ronaldo",
+  role: "admin", email: "ronaldo.teste@empresa.com",
+  password: "123456",
+  displayName: "Ronaldo",
+  role: "admin",
+},
+
 ];
 
 const form = document.getElementById("loginForm");

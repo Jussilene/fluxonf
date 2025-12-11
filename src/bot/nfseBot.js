@@ -860,3 +860,4 @@ export async function runLoteDownload(empresas = [], options = {}) {
 
   return logs;
 }
+
