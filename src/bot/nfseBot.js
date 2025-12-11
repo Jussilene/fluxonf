@@ -25,7 +25,8 @@ async function launchNFSEBrowser() {
   return await chromium.launch({
     // no servidor (Linux) SEMPRE em headless
     headless: isLinux ? true : false,
-    slowMo: 150,
+    // no servidor: rápido (0) | no Windows: devagar para visualização
+    slowMo: isLinux ? 0 : 150,
     args: isLinux
       ? [
           "--no-sandbox",
@@ -461,7 +462,7 @@ async function runManualDownloadPortal(params = {}) {
         const diBr = formatDateBrFromISO(dataInicial);
         const dfBr = formatDateBrFromISO(dataFinal);
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(500); // antes 1000
 
         const dataInicialInput =
           (await page.$(
@@ -497,7 +498,7 @@ async function runManualDownloadPortal(params = {}) {
 
           if (botaoPesquisar) {
             await botaoPesquisar.click();
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(1500); // antes 3000
             pushLog(
               `[BOT] Filtro de período aplicado pelos campos: ${buildPeriodoLabel(
                 dataInicial,
@@ -624,7 +625,7 @@ async function runManualDownloadPortal(params = {}) {
               }
 
               await trigger.click({ force: true });
-              await page.waitForTimeout(400);
+              await page.waitForTimeout(200); // antes 400
 
               const menu =
                 (await menuWrapper.$(".menu-content")) ||
@@ -697,7 +698,7 @@ async function runManualDownloadPortal(params = {}) {
                 }
               }
 
-              await page.waitForTimeout(300);
+              await page.waitForTimeout(150); // antes 300
             } catch (linhaErr) {
               pushLog(
                 `[BOT] Erro inesperado ao processar a linha ${linhaIndex}: ${linhaErr.message}`
