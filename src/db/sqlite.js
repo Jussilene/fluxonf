@@ -17,6 +17,11 @@ const db = new Database(dbPath);
 db.exec(`
   CREATE TABLE IF NOT EXISTS historico_execucoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- 🔹 ADICIONADO para separar histórico por usuário (sem quebrar nada)
+    usuarioEmail TEXT,
+    usuarioNome TEXT,
+
     empresaId TEXT,
     empresaNome TEXT,
     tipo TEXT,                -- 'manual' | 'lote'

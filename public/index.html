@@ -13,61 +13,200 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
       }
-      .bg-grid {
-        background-image: radial-gradient(circle at 1px 1px, #e5e7eb 1px, transparent 0);
-        background-size: 16px 16px;
+
+      /* Tema escuro baseado em preto/branco */
+      body.dark-mode {
+        background-color: #020617;
+        color: #e5e7eb;
+      }
+
+      body.dark-mode .bg-white,
+      body.dark-mode .bg-slate-50,
+      body.dark-mode .bg-slate-100 {
+        background-color: #020617 !important;
+      }
+
+      body.dark-mode .border-slate-100,
+      body.dark-mode .border-slate-200,
+      body.dark-mode .border-slate-300 {
+        border-color: #1f2937 !important;
+      }
+
+      body.dark-mode .text-slate-900,
+      body.dark-mode .text-slate-800,
+      body.dark-mode .text-slate-700 {
+        color: #f9fafb !important;
+      }
+
+      body.dark-mode .text-slate-500,
+      body.dark-mode .text-slate-400 {
+        color: #9ca3af !important;
+      }
+
+      body.dark-mode input {
+        background-color: #020617 !important;
+        color: #f9fafb !important;
+      }
+
+      body.dark-mode .bg-primary-btn {
+        background-color: #111827 !important;
+        color: #f9fafb !important;
+      }
+
+      body.dark-mode .bg-primary-btn:hover {
+        background-color: #020617 !important;
+      }
+
+      body.dark-mode .hover\:bg-slate-100:hover {
+        background-color: #020617 !important;
       }
     </style>
   </head>
 
   <body class="min-h-screen bg-slate-50">
-    <div
-      class="min-h-screen flex flex-col items-center justify-center px-4 bg-gradient-to-br from-slate-50 via-sky-50 to-slate-100"
-    >
-      <div class="max-w-md w-full">
-        <div
-          class="mb-6 text-center"
+    <div class="min-h-screen flex flex-col items-center justify-center px-4">
+      <!-- Barra superior com logo + tema -->
+      <div class="w-full max-w-md flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+          <div
+            class="h-9 w-9 rounded-lg border border-slate-300 flex items-center justify-center text-[11px] font-semibold tracking-[0.18em]"
+          >
+            IA
+          </div>
+          <div class="leading-tight">
+            <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
+              NFSe Emissor Nacional
+            </p>
+            <p class="text-sm text-slate-400">
+              Console inteligente de notas fiscais eletrônicas
+            </p>
+          </div>
+        </div>
+
+        <!-- Switch de tema (1 botão) -->
+        <button
+          id="themeToggleBtnLogin"
+          type="button"
+          aria-label="Alternar tema"
+          aria-checked="false"
+          role="switch"
+          class="relative inline-flex items-center w-[74px] h-[34px] rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
         >
+          <span class="absolute inset-0 flex items-center justify-between px-2">
+            <!-- Sol -->
+            <span id="themeSunIconLogin" class="text-slate-700">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
+                <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </span>
+
+            <!-- Lua -->
+            <span id="themeMoonIconLogin" class="text-slate-400">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </span>
+
+          <!-- Knob -->
+          <span
+            id="themeToggleKnobLogin"
+            class="absolute left-[3px] top-[3px] h-[28px] w-[28px] rounded-full bg-white border border-slate-200 shadow-sm transition-transform"
+          ></span>
+        </button>
+      </div>
+
+      <div class="max-w-md w-full">
+        <div class="mb-5">
           <h1 class="text-2xl font-semibold text-slate-900">
-            IA NFSe
+            Acesse sua área segura
           </h1>
           <p class="text-sm text-slate-500 mt-1">
-            Acesse com seu usuário para gerenciar notas fiscais.
+            Use seu e-mail corporativo para entrar no painel da IA NFSe.
           </p>
         </div>
 
         <div
-          class="bg-white shadow-lg rounded-2xl p-6 border border-slate-100"
+          class="bg-white shadow-xl shadow-slate-900/5 rounded-2xl p-6 border border-slate-100"
         >
           <form id="loginForm" class="space-y-4">
-            <div>
-              <label
-                for="email"
-                class="block text-sm font-medium text-slate-700"
-                >E-mail</label
-              >
+            <div class="space-y-1.5">
+              <label for="email" class="block text-sm font-medium text-slate-700">
+                E-mail corporativo
+              </label>
               <input
                 id="email"
                 type="email"
                 required
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                placeholder="Ex: admju@empresa.com"
+                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                placeholder="ex: adm@empresa.com.br"
+                autocomplete="username"
               />
             </div>
 
-            <div>
-              <label
-                for="password"
-                class="block text-sm font-medium text-slate-700"
-                >Senha</label
-              >
-              <input
-                id="password"
-                type="password"
-                required
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                placeholder="Digite sua senha"
-              />
+            <div class="space-y-1.5">
+              <label for="password" class="block text-sm font-medium text-slate-700">
+                Senha
+              </label>
+
+              <!-- Campo senha com botão olho -->
+              <div class="relative">
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                  placeholder="Digite sua senha"
+                  autocomplete="current-password"
+                />
+
+                <button
+                  id="togglePasswordBtn"
+                  type="button"
+                  aria-label="Mostrar senha"
+                  title="Mostrar senha"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center"
+                >
+                  <!-- olho fechado (default) -->
+                  <span id="eyeClosedIcon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path d="M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M10.58 10.58a3 3 0 0 0 4.24 4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M9.88 5.09A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a18.44 18.44 0 0 1-3.02 4.25" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M6.61 6.61A18.65 18.65 0 0 0 2 12s3 7 10 7a10.52 10.52 0 0 0 3.39-.55" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+
+                  <!-- olho aberto -->
+                  <span id="eyeOpenIcon" class="hidden" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                  </span>
+                </button>
+              </div>
+
+              <!-- Lembrar + Esqueci -->
+              <div class="mt-2 flex items-center justify-between">
+                <label class="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
+                  <input
+                    id="rememberAccess"
+                    type="checkbox"
+                    class="rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  <span>Lembrar acesso</span>
+                </label>
+
+                <button
+                  id="forgotPasswordBtn"
+                  type="button"
+                  class="text-xs text-slate-600 hover:text-slate-900 hover:underline"
+                >
+                  Esqueceu a senha?
+                </button>
+              </div>
             </div>
 
             <div
@@ -79,14 +218,132 @@
 
             <button
               type="submit"
-              class="w-full inline-flex justify-center items-center gap-2 rounded-lg bg-sky-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-sky-700 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-50"
+              class="bg-primary-btn w-full inline-flex justify-center items-center gap-2 rounded-lg bg-slate-900 text-white text-sm font-medium px-4 py-2.5 hover:bg-black transition-colors focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 focus:ring-offset-slate-50"
             >
-              Entrar
+              Entrar no painel
             </button>
           </form>
         </div>
+
+        <p class="mt-4 text-[11px] text-slate-400 text-center">
+          Toda autenticação é registrada para auditoria de acesso.
+        </p>
       </div>
     </div>
+
+    <!-- Modal "Esqueci a senha" (MVP) -->
+    <div
+      id="forgotModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center px-4"
+      aria-hidden="true"
+    >
+      <div id="forgotBackdrop" class="absolute inset-0 bg-black/50"></div>
+
+      <div class="relative w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-xl p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-900">Recuperar acesso</h3>
+            <p class="text-xs text-slate-500 mt-1">
+              Neste MVP, a recuperação é feita via suporte/admin.
+            </p>
+          </div>
+
+          <button
+            id="closeForgotModal"
+            type="button"
+            class="h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center"
+            aria-label="Fechar"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="mt-4 space-y-3">
+          <div class="text-xs text-slate-600">
+            Informe seu e-mail abaixo e clique em <span class="font-semibold">Enviar e-mail</span>.
+            Isso abrirá o aplicativo de e-mail com a mensagem pronta.
+          </div>
+
+          <div>
+            <label for="forgotEmail" class="block text-xs font-medium text-slate-700">Seu e-mail</label>
+            <input
+              id="forgotEmail"
+              type="email"
+              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+              placeholder="ex: adm@empresa.com.br"
+            />
+            <p class="mt-1 text-[11px] text-slate-500">
+              Dica: use o mesmo e-mail do login.
+            </p>
+          </div>
+
+          <div class="flex flex-col sm:flex-row gap-2">
+            <button
+              id="copyForgotEmail"
+              type="button"
+              class="flex-1 px-4 py-2.5 text-xs md:text-sm border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-700"
+            >
+              Copiar e-mail
+            </button>
+            <button
+              id="sendForgotEmail"
+              type="button"
+              class="flex-1 px-4 py-2.5 text-xs md:text-sm rounded-lg bg-slate-900 text-white hover:bg-black"
+            >
+              Enviar e-mail
+            </button>
+          </div>
+
+          <p id="forgotFeedback" class="text-[11px] text-slate-500"></p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Tema (login) - mantém a mesma chave nfseTheme
+      (function () {
+        const btn = document.getElementById("themeToggleBtnLogin");
+        const knob = document.getElementById("themeToggleKnobLogin");
+        const sun = document.getElementById("themeSunIconLogin");
+        const moon = document.getElementById("themeMoonIconLogin");
+
+        function applyUI(isDark) {
+          document.body.classList.toggle("dark-mode", isDark);
+          localStorage.setItem("nfseTheme", isDark ? "dark" : "light");
+          if (btn) btn.setAttribute("aria-checked", String(isDark));
+
+          if (knob) {
+            knob.classList.toggle("translate-x-[40px]", isDark);
+            knob.classList.toggle("bg-slate-900", isDark);
+            knob.classList.toggle("border-slate-700", isDark);
+            knob.classList.toggle("bg-white", !isDark);
+            knob.classList.toggle("border-slate-200", !isDark);
+          }
+
+          if (sun) {
+            sun.classList.toggle("text-slate-700", !isDark);
+            sun.classList.toggle("text-slate-400", isDark);
+          }
+
+          if (moon) {
+            moon.classList.toggle("text-slate-400", !isDark);
+            moon.classList.toggle("text-slate-200", isDark);
+          }
+        }
+
+        const savedTheme = localStorage.getItem("nfseTheme") || "light";
+        applyUI(savedTheme === "dark");
+
+        if (btn) {
+          btn.addEventListener("click", () => {
+            const willBeDark = !document.body.classList.contains("dark-mode");
+            applyUI(willBeDark);
+          });
+        }
+      })();
+    </script>
 
     <script src="/js/login.js"></script>
   </body>

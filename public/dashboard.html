@@ -13,9 +13,113 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
       }
-      .tab-active {
-        /* esse @apply aqui não funciona no browser, mas vou deixar
-           como estava pra não quebrar nada */
+
+      /* TEMA ESCURO PRETO/BRANCO */
+      body.dark-mode {
+        background-color: #020617; /* quase preto */
+        color: #e5e7eb;
+      }
+
+      /* Painéis e cards ficam escuros */
+      body.dark-mode .bg-white,
+      body.dark-mode .bg-slate-50,
+      body.dark-mode .bg-slate-100 {
+        background-color: #020617 !important;
+      }
+
+      /* Versões translucidas */
+      body.dark-mode .bg-white\/90,
+      body.dark-mode .bg-slate-50\/80 {
+        background-color: rgba(2, 6, 23, 0.96) !important;
+      }
+
+      /* Header/topbar */
+      body.dark-mode header {
+        background-color: rgba(2, 6, 23, 0.96) !important;
+        border-color: #1f2937 !important;
+      }
+
+      /* Bordas mais escuras */
+      body.dark-mode .border-slate-100,
+      body.dark-mode .border-slate-200,
+      body.dark-mode .border-slate-300 {
+        border-color: #1f2937 !important;
+      }
+
+      /* Textos principais claros no dark */
+      body.dark-mode .text-slate-900,
+      body.dark-mode .text-slate-800,
+      body.dark-mode .text-slate-700 {
+        color: #f9fafb !important;
+      }
+
+      body.dark-mode .text-slate-500,
+      body.dark-mode .text-slate-400 {
+        color: #9ca3af !important;
+      }
+
+      /* Inputs no dark */
+      body.dark-mode input,
+      body.dark-mode select,
+      body.dark-mode textarea {
+        background-color: #020617 !important;
+        color: #f9fafb !important;
+      }
+
+      /* Botões principais no dark (preto/branco) */
+      body.dark-mode .bg-primary-btn,
+      body.dark-mode .bg-emerald-600,
+      body.dark-mode .bg-emerald-700,
+      body.dark-mode .bg-sky-600,
+      body.dark-mode .bg-sky-700 {
+        background-color: #111827 !important;
+        color: #f9fafb !important;
+      }
+
+      body.dark-mode .bg-primary-btn:hover,
+      body.dark-mode .bg-emerald-600:hover,
+      body.dark-mode .bg-emerald-700:hover,
+      body.dark-mode .bg-sky-600:hover,
+      body.dark-mode .bg-sky-700:hover {
+        background-color: #020617 !important;
+      }
+
+      /* Hovers clarinhos */
+      body.dark-mode .hover\:bg-slate-50:hover,
+      body.dark-mode .hover\:bg-sky-50:hover,
+      body.dark-mode .hover\:bg-rose-50:hover,
+      body.dark-mode .hover\:bg-slate-100:hover {
+        background-color: #020617 !important;
+      }
+
+      /* Tabelas e logs */
+      body.dark-mode #logsDownload,
+      body.dark-mode #logsLote {
+        background-color: #020617 !important;
+        color: #e5e7eb !important;
+        border-color: #1f2937 !important;
+      }
+
+      body.dark-mode table {
+        background-color: #020617 !important;
+      }
+
+      /* Linha selecionada em empresas */
+      body.dark-mode tr.bg-sky-100 {
+        background-color: #111827 !important;
+      }
+
+      /* Tabs */
+      body.dark-mode .tab-btn {
+        border-color: #374151;
+      }
+
+      body.dark-mode .tab-btn.border-slate-900 {
+        border-color: #f9fafb !important;
+      }
+
+      body.dark-mode .tab-btn.bg-slate-100 {
+        background-color: #111827 !important;
       }
     </style>
   </head>
@@ -27,288 +131,350 @@
         class="w-full border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-20"
       >
         <div
-          class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4"
+          class="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-4"
         >
-          <div>
-            <h1 class="text-2xl font-semibold text-slate-900">
-              IA NFS-e
-            </h1>
-            <p class="text-sm text-slate-500">
-              Painel inteligente para baixar, organizar e auditar NFS-e.
-            </p>
-          </div>
-
-          <!-- Bloco usuário -->
-          <div
-            class="flex items-center gap-3 bg-slate-50/80 border border-slate-200 rounded-full px-3 py-2"
-          >
+          <div class="flex items-center gap-3">
             <div
-              id="userAvatar"
-              class="h-8 w-8 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 font-semibold text-sm"
+              class="h-9 w-9 rounded-lg border border-slate-300 flex items-center justify-center text-[11px] font-semibold tracking-[0.18em]"
             >
-              ?
+              IA
             </div>
             <div class="leading-tight">
-              <p class="text-[11px] uppercase tracking-wide text-slate-400">
-                Logado como
+              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
+                NFSe Emissor Nacional
               </p>
-              <p
-                id="userNameDisplay"
-                class="text-sm font-semibold text-slate-700"
-              >
-                ...
+              <p class="text-sm text-slate-400">
+                Console inteligente de notas fiscais eletrônicas
               </p>
             </div>
+          </div>
+
+          <!-- Bloco usuário + tema -->
+          <div class="flex items-center gap-3">
+            <!-- Switch de tema -->
             <button
-              id="logoutBtn"
-              class="text-sm px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors"
+              id="themeToggleBtn"
+              type="button"
+              aria-label="Alternar tema"
+              aria-checked="false"
+              role="switch"
+              class="relative inline-flex items-center w-[74px] h-[34px] rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
             >
-              Sair
+              <span class="absolute inset-0 flex items-center justify-between px-2">
+                <!-- Sol -->
+                <span id="themeSunIcon" class="text-slate-700">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
+                    <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </span>
+
+                <!-- Lua -->
+                <span id="themeMoonIcon" class="text-slate-400">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </span>
+
+              <!-- Knob -->
+              <span
+                id="themeToggleKnob"
+                class="absolute left-[3px] top-[3px] h-[28px] w-[28px] rounded-full bg-white border border-slate-200 shadow-sm transition-transform"
+              ></span>
             </button>
+
+            <div
+              class="flex items-center gap-3 bg-slate-50/80 border border-slate-200 rounded-full px-3 py-1.5"
+            >
+              <div
+                id="userAvatar"
+                class="h-7 w-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-semibold"
+              >
+                ?
+              </div>
+              <div class="leading-tight">
+                <p class="text-[10px] uppercase tracking-wide text-slate-400">
+                  Usuário logado
+                </p>
+                <p
+                  id="userNameDisplay"
+                  class="text-xs font-medium text-slate-700"
+                >
+                  ...
+                </p>
+              </div>
+              <button
+                id="logoutBtn"
+                class="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Sair
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       <!-- Conteúdo -->
-      <main class="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-6">
-        <!-- Tabs -->
-        <div
-          class="inline-flex rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden"
-        >
-          <button
-            data-tab="download"
-            class="tab-btn px-5 py-2.5 text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
+      <main class="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 py-6 space-y-6">
+        <!-- Tabs (centralizadas) -->
+        <div class="flex justify-center">
+          <div
+            class="inline-flex rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden"
           >
-            Download Manual / Único
-          </button>
-          <button
-            data-tab="empresas"
-            class="tab-btn px-5 py-2.5 text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            Gerenciar Empresas / Em Lote
-          </button>
-          <!-- Aba Histórico -->
-          <button
-            data-tab="historico"
-            class="tab-btn px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Histórico
-          </button>
+            <button
+              data-tab="download"
+              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Download Manual / Único
+            </button>
+            <button
+              data-tab="empresas"
+              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Gerenciar Empresas / Em Lote
+            </button>
+            <button
+              data-tab="historico"
+              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Histórico
+            </button>
+          </div>
         </div>
 
         <!-- Painel Download Manual -->
         <section
           id="tab-download"
-          class="tab-panel space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6"
+          class="tab-panel space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
+                 min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
-          <h2 class="text-base font-semibold text-slate-800 mb-2">
-            1. Login e Navegação
-          </h2>
-
-          <!-- Bloco de login manual + instruções -->
-          <div class="space-y-4 mb-4">
-            <div class="flex flex-col md:flex-row md:items-center gap-4">
-              <button
-                id="abrirNavegadorBtn"
-                class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium rounded-lg bg-sky-600 text-white hover:bg-sky-700 transition-colors"
-              >
-                Abrir Navegador
-              </button>
-              <p class="text-sm text-slate-500">
-                Clique para abrir o navegador. Faça o login manualmente e navegue até a tela de 'Notas Emitidas'.
-                Se você informar <span class="font-semibold">CNPJ/Login</span> e
-                <span class="font-semibold">Senha</span> abaixo, será realizado o
-                login automaticamente para você.
+          <div
+            class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+          >
+            <div>
+              <h2 class="text-base font-semibold text-slate-800">
+                Download manual de NFS-e
+              </h2>
+              <p class="text-xs md:text-sm text-slate-500">
+                Configure o robô para baixar notas de uma única empresa com
+                controle de período, tipo de nota e formato.
               </p>
             </div>
-
-            <!-- Login / Senha usados pelo modo Manual Único -->
-            <div
-              class="grid md:grid-cols-3 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100"
-            >
-              <div>
-                <label
-                  for="manualLoginPortal"
-                  class="block text-sm font-medium text-slate-700"
-                  >CNPJ ou Login no portal</label
-                >
-                <input
-                  id="manualLoginPortal"
-                  type="text"
-                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  placeholder="Digite o CNPJ ou login do portal"
-                />
-                <p class="mt-1 text-[11px] text-slate-500">
-                  Ex.: CNPJ completo ou usuário cadastrado no Emissor Nacional.
-                </p>
-              </div>
-
-              <div>
-                <label
-                  for="manualSenhaPortal"
-                  class="block text-sm font-medium text-slate-700"
-                  >Senha do portal</label
-                >
-                <input
-                  id="manualSenhaPortal"
-                  type="password"
-                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  placeholder="Senha"
-                />
-                <p class="mt-1 text-[11px] text-slate-500">
-                  Usada apenas localmente pelo robô para fazer o login.
-                </p>
-              </div>
-
-              <div class="flex items-end">
-                <p class="text-xs text-slate-500">
-                  Campos obrigatórios: informe o
-                  <span class="font-semibold">CNPJ/Login</span> e a
-                  <span class="font-semibold">Senha</span> do portal para conseguir acessar o Emissor Nacional.
-                </p>
-              </div>
-            </div>
           </div>
 
-          <hr class="border-slate-100" />
-
-          <h3 class="text-base font-semibold text-slate-800 mb-2">
-            2. Configuração e Download
-          </h3>
-
+          <!-- GRID: Configurações x Logs -->
           <div
-            class="grid md:grid-cols-3 gap-5 items-end bg-slate-50 rounded-xl p-5 border border-slate-100"
+            class="mt-4 grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-5 items-stretch"
           >
-            <div>
-              <label
-                for="dataInicial"
-                class="block text-sm font-medium text-slate-700"
-                >Data Inicial</label
-              >
-              <input
-                id="dataInicial"
-                type="date"
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-              />
-            </div>
-
-            <div>
-              <label
-                for="dataFinal"
-                class="block text-sm font-medium text-slate-700"
-                >Data Final</label
-              >
-              <input
-                id="dataFinal"
-                type="date"
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-              />
-            </div>
-
-            <div class="space-y-3">
-              <span class="block text-sm font-medium text-slate-700">
-                Tipo de Nota
-              </span>
-              <div class="flex items-center gap-6 text-sm">
-                <label class="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="tipoNota"
-                    value="emitidas"
-                    checked
-                    class="text-sky-600 focus:ring-sky-500"
-                  />
-                  <span>Notas Emitidas (Saída)</span>
-                </label>
-                <label class="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="tipoNota"
-                    value="recebidas"
-                    class="text-sky-600 focus:ring-sky-500"
-                  />
-                  <span>Notas Recebidas (Entrada)</span>
-                </label>
-              </div>
-
-              <div class="flex items-center gap-6 text-sm">
-                <label class="inline-flex items-center gap-2">
-                  <input
-                    id="baixarXml"
-                    type="checkbox"
-                    checked
-                    class="text-sky-600 focus:ring-sky-500"
-                  />
-                <span>Baixar XML</span>
-                </label>
-                <label class="inline-flex items-center gap-2">
-                  <input
-                    id="baixarPdf"
-                    type="checkbox"
-                    checked
-                    class="text-sky-600 focus:ring-sky-500"
-                  />
-                  <span>Baixar PDF</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div
-            class="flex flex-col md:flex-row md:items-center gap-4 mt-4 bg-slate-50 rounded-xl p-5 border border-slate-100"
-          >
-            <div class="flex-1">
-              <label
-                for="pastaDestino"
-                class="block text-sm font-medium text-slate-700"
-                >Pasta de destino</label
-              >
-
-              <div class="flex flex-col md:flex-row gap-2">
+            <!-- Coluna esquerda: toda configuração do manual -->
+            <div class="space-y-4">
+              <!-- Botão portal + texto -->
+              <div class="flex flex-col md:flex-row md:items-center gap-4">
                 <button
-                  id="selecionarPastaBtn"
-                  type="button"
-                  class="px-4 py-2 text-xs md:text-sm border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-700"
+                  id="abrirNavegadorBtn"
+                  class="bg-primary-btn inline-flex items-center justify-center px-5 py-2.5 text-xs md:text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-black transition-colors"
                 >
-                  Selecionar Pasta de Destino
+                  Abrir portal NFS-e
                 </button>
-
-                <input
-                  id="pastaDestino"
-                  type="text"
-                  class="mt-1 md:mt-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  placeholder="Ex: downloads"
-                  value="downloads"
-                />
+                <p class="text-xs md:text-sm text-slate-500">
+                  Abre o Emissor Nacional em uma nova aba. Faça o login
+                  normalmente ou deixe o robô logar usando as credenciais abaixo.
+                </p>
               </div>
 
-              <p class="mt-1 text-xs md:text-sm text-slate-500">
-                A ferramenta criará subpastas
-                <span class="font-medium">Entrada</span> e
-                <span class="font-medium">Saída</span> automaticamente, dentro
-                da pasta informada no servidor.
-              </p>
+              <!-- Login / Senha -->
+              <div
+                class="grid md:grid-cols-3 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100"
+              >
+                <div>
+                  <label
+                    for="manualLoginPortal"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >CNPJ ou login no portal</label
+                  >
+                  <input
+                    id="manualLoginPortal"
+                    type="text"
+                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    placeholder="Digite o CNPJ ou login do portal"
+                  />
+                  <p class="mt-1 text-[11px] text-slate-500">
+                    Ex.: CNPJ completo ou usuário cadastrado no Emissor Nacional.
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    for="manualSenhaPortal"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >Senha do portal</label
+                  >
+                  <input
+                    id="manualSenhaPortal"
+                    type="password"
+                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    placeholder="Senha"
+                  />
+                  <p class="mt-1 text-[11px] text-slate-500">
+                    Usada apenas localmente pelo robô para fazer o login.
+                  </p>
+                </div>
+
+                <div class="flex items-end">
+                  <p class="text-[11px] text-slate-500">
+                    Preencha <span class="font-semibold">login</span> e
+                    <span class="font-semibold">senha</span> para o robô acessar
+                    o portal automaticamente.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Período + tipo + formatos -->
+              <div
+                class="grid md:grid-cols-3 gap-5 items-end bg-slate-50 rounded-xl p-5 border border-slate-100"
+              >
+                <div>
+                  <label
+                    for="dataInicial"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >Data inicial</label
+                  >
+                  <input
+                    id="dataInicial"
+                    type="date"
+                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    for="dataFinal"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >Data final</label
+                  >
+                  <input
+                    id="dataFinal"
+                    type="date"
+                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                  />
+                </div>
+
+                <div class="space-y-3">
+                  <span
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >Tipo de nota</span
+                  >
+                  <div class="flex items-center gap-6 text-xs md:text-sm">
+                    <label class="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="tipoNota"
+                        value="emitidas"
+                        checked
+                        class="text-slate-900 focus:ring-slate-900"
+                      />
+                      <span>Notas emitidas (Saída)</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="tipoNota"
+                        value="recebidas"
+                        class="text-slate-900 focus:ring-slate-900"
+                      />
+                      <span>Notas recebidas (Entrada)</span>
+                    </label>
+                  </div>
+
+                  <div class="flex items-center gap-6 text-xs md:text-sm">
+                    <label class="inline-flex items-center gap-2">
+                      <input
+                        id="baixarXml"
+                        type="checkbox"
+                        checked
+                        class="text-slate-900 focus:ring-slate-900"
+                      />
+                      <span>Baixar XML</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                      <input
+                        id="baixarPdf"
+                        type="checkbox"
+                        checked
+                        class="text-slate-900 focus:ring-slate-900"
+                      />
+                      <span>Baixar PDF</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pasta + botão iniciar -->
+              <div
+                class="flex flex-col md:flex-row md:items-center gap-4 bg-slate-50 rounded-xl p-5 border border-slate-100"
+              >
+                <div class="flex-1">
+                  <label
+                    for="pastaDestino"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
+                    >Pasta de destino</label
+                  >
+
+                  <div class="flex flex-col md:flex-row gap-2">
+                    <button
+                      id="selecionarPastaBtn"
+                      type="button"
+                      class="px-4 py-2 text-xs md:text-sm border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-700"
+                    >
+                      Selecionar pasta de destino
+                    </button>
+
+                    <input
+                      id="pastaDestino"
+                      type="text"
+                      class="mt-1 md:mt-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      placeholder="Ex: downloads"
+                      value="downloads"
+                    />
+                  </div>
+
+                  <p class="mt-1 text-xs md:text-sm text-slate-500">
+                    O robô criará
+                    <span class="font-medium">Entrada</span> e
+                    <span class="font-medium">Saída</span> dentro dessa pasta no
+                    servidor.
+                  </p>
+                </div>
+
+                <button
+                  id="iniciarDownloadBtn"
+                  class="bg-primary-btn inline-flex items-center justify-center px-6 py-2.5 text-xs md:text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-black transition-colors"
+                >
+                  Iniciar download
+                </button>
+              </div>
             </div>
 
-            <button
-              id="iniciarDownloadBtn"
-              class="inline-flex items-center justify-center px-6 py-2.5 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-            >
-              Iniciar Download
-            </button>
-          </div>
-
-          <div class="mt-4">
-            <h4 class="text-sm font-semibold text-slate-700 mb-1">
-              Logs de Progresso
-            </h4>
-
+            <!-- Coluna direita: logs (acompanha a tela) -->
             <div
-              id="logsDownload"
-              class="min-h-[160px] max-h-72 overflow-y-auto text-xs md:text-sm font-mono 
-                     bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
+              class="bg-slate-50 rounded-xl p-5 border border-slate-100 flex flex-col
+                     lg:sticky lg:top-24 max-h-[calc(100vh-140px)]"
             >
-              <div class="text-slate-500">Aguardando início do download...</div>
+              <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
+                Logs de progresso
+              </h4>
+              <p class="text-[11px] text-slate-500 mb-2">
+                Acompanhe aqui tudo o que o robô está fazendo em tempo real.
+              </p>
+
+              <div
+                id="logsDownload"
+                class="flex-1 min-h-0 overflow-y-auto text-xs md:text-sm font-mono
+                       bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
+              >
+                <div class="text-slate-500">Aguardando início do download...</div>
+              </div>
             </div>
           </div>
         </section>
@@ -316,20 +482,31 @@
         <!-- Painel Empresas / Lote -->
         <section
           id="tab-empresas"
-          class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6"
+          class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
+                 min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
-          <h2 class="text-base font-semibold text-slate-800 mb-2">
-            Gerenciar Empresas e Execução em Lote
-          </h2>
+          <div
+            class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+          >
+            <div>
+              <h2 class="text-base font-semibold text-slate-800">
+                Gerenciar empresas e execução em lote
+              </h2>
+              <p class="text-xs md:text-sm text-slate-500">
+                Cadastre empresas e rode o robô para todas de uma vez com o
+                mesmo período e configuração.
+              </p>
+            </div>
+          </div>
 
           <div class="grid md:grid-cols-3 gap-5">
             <div class="md:col-span-2">
-              <h3 class="text-sm font-semibold text-slate-700 mb-2">
-                Empresas Cadastradas
+              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">
+                Empresas cadastradas
               </h3>
 
               <table
-                class="w-full text-sm border border-slate-200 rounded-xl overflow-hidden"
+                class="w-full text-xs md:text-sm border border-slate-200 rounded-xl overflow-hidden"
               >
                 <thead
                   class="bg-slate-100 text-slate-600 border-b border-slate-200"
@@ -345,7 +522,7 @@
 
               <button
                 id="removerEmpresaBtn"
-                class="mt-3 inline-flex items-center justify-center px-4 py-2 text-sm rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                class="mt-3 inline-flex items-center justify-center px-4 py-2 text-xs md:text-sm rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed"
                 disabled
               >
                 Remover selecionada
@@ -354,45 +531,45 @@
 
             <!-- Criar Empresa -->
             <div>
-              <h3 class="text-sm font-semibold text-slate-700 mb-2">
-                Adicionar Nova Empresa
+              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">
+                Adicionar nova empresa
               </h3>
               <div
                 class="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3"
               >
                 <div>
                   <label
-                    class="block text-sm font-medium text-slate-700"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
                     for="nomeEmpresa"
-                    >Nome Amigável</label
+                    >Nome amigável</label
                   >
                   <input
                     id="nomeEmpresa"
-                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                     placeholder="Nome amigável"
                   />
                 </div>
                 <div>
                   <label
-                    class="block text-sm font-medium text-slate-700"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
                     for="cnpjEmpresa"
                     >CNPJ</label
                   >
                   <input
                     id="cnpjEmpresa"
-                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                     placeholder="CNPJ"
                   />
                 </div>
                 <div>
                   <label
-                    class="block text-sm font-medium text-slate-700"
+                    class="block text-xs md:text-sm font-medium text-slate-700"
                     for="senhaPortal"
                     >Senha portal</label
                   >
                   <input
                     id="senhaPortal"
-                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                     placeholder="Senha portal"
                     type="password"
                   />
@@ -400,9 +577,9 @@
 
                 <button
                   id="salvarEmpresaBtn"
-                  class="w-full px-4 py-2.5 text-sm bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors"
+                  class="bg-primary-btn w-full px-4 py-2.5 text-xs md:text-sm bg-slate-900 text-white rounded-lg hover:bg-black transition-colors"
                 >
-                  Salvar Empresa
+                  Salvar empresa
                 </button>
 
                 <div
@@ -416,150 +593,158 @@
           <hr class="border-slate-100" />
 
           <!-- Execução Lote -->
-          <div
-            class="border border-slate-200 rounded-xl p-5 bg-slate-50 space-y-3"
-          >
-            <h3 class="text-sm font-semibold text-slate-700 mb-2">
-              Execução em Lote (todas as empresas)
-            </h3>
-
-            <!-- Período + Tipo de Nota (Lote), como no app desktop -->
+          <div class="border border-slate-200 rounded-xl p-5 bg-slate-50">
             <div
-              class="flex flex-col md:flex-row md:items-end gap-4 mb-3 text-sm"
+              class="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-4"
             >
-              <div class="flex flex-col md:flex-row gap-3 md:items-end">
+              <!-- Esquerda: configuração do lote -->
+              <div class="space-y-3">
                 <div>
-                  <label
-                    for="loteDataInicial"
-                    class="block text-sm font-medium text-slate-700"
-                    >Período Comum - Data Inicial</label
-                  >
-                  <input
-                    id="loteDataInicial"
-                    type="date"
-                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  />
+                  <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
+                    Execução em lote (todas as empresas)
+                  </h3>
+                  <p class="text-[11px] md:text-xs text-slate-500">
+                    O mesmo período e configuração será aplicado para todas as
+                    empresas cadastradas.
+                  </p>
                 </div>
-                <div>
-                  <label
-                    for="loteDataFinal"
-                    class="block text-sm font-medium text-slate-700"
-                    >Data Final</label
-                  >
-                  <input
-                    id="loteDataFinal"
-                    type="date"
-                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  />
-                </div>
-              </div>
 
-              <div class="flex flex-col gap-1">
-                <span class="text-sm font-medium text-slate-700"
-                  >Tipo de Nota (Lote)</span
-                >
-                <div class="flex items-center gap-6">
+                <!-- Período + Tipo -->
+                <div class="flex flex-col md:flex-row md:items-end gap-4 text-xs md:text-sm">
+                  <div class="flex flex-col md:flex-row gap-3 md:items-end">
+                    <div>
+                      <label
+                        for="loteDataInicial"
+                        class="block text-xs md:text-sm font-medium text-slate-700"
+                        >Período comum - Data inicial</label
+                      >
+                      <input
+                        id="loteDataInicial"
+                        type="date"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        for="loteDataFinal"
+                        class="block text-xs md:text-sm font-medium text-slate-700"
+                        >Data final</label
+                      >
+                      <input
+                        id="loteDataFinal"
+                        type="date"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs md:text-sm font-medium text-slate-700"
+                      >Tipo de nota (Lote)</span
+                    >
+                    <div class="flex items-center gap-6">
+                      <label class="inline-flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="loteTipoNota"
+                          value="emitidas"
+                          checked
+                          class="text-slate-900 focus:ring-slate-900"
+                        />
+                        <span>Emitidas</span>
+                      </label>
+                      <label class="inline-flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="loteTipoNota"
+                          value="recebidas"
+                          class="text-slate-900 focus:ring-slate-900"
+                        />
+                        <span>Recebidas</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Formatos -->
+                <div class="flex items-center gap-6 text-xs md:text-sm">
                   <label class="inline-flex items-center gap-2">
                     <input
-                      type="radio"
-                      name="loteTipoNota"
-                      value="emitidas"
+                      id="loteBaixarXml"
+                      type="checkbox"
+                      class="text-slate-900 focus:ring-slate-900"
                       checked
-                      class="text-sky-600 focus:ring-sky-500"
                     />
-                    <span>Emitidas</span>
+                    <span>Baixar XML (Lote)</span>
                   </label>
                   <label class="inline-flex items-center gap-2">
                     <input
-                      type="radio"
-                      name="loteTipoNota"
-                      value="recebidas"
-                      class="text-sky-600 focus:ring-sky-500"
+                      id="loteBaixarPdf"
+                      type="checkbox"
+                      class="text-slate-900 focus:ring-slate-900"
+                      checked
                     />
-                    <span>Recebidas</span>
+                    <span>Baixar PDF (Lote)</span>
                   </label>
                 </div>
-              </div>
-            </div>
 
-            <!-- Formatos para o Lote (XML/PDF) -->
-            <div class="flex items-center gap-6 text-sm mb-3">
-              <label class="inline-flex items-center gap-2">
-                <input
-                  id="loteBaixarXml"
-                  type="checkbox"
-                  class="text-sky-600 focus:ring-sky-500"
-                  checked
-                />
-                <span>Baixar XML (Lote)</span>
-              </label>
-              <label class="inline-flex items-center gap-2">
-                <input
-                  id="loteBaixarPdf"
-                  type="checkbox"
-                  class="text-sky-600 focus:ring-sky-500"
-                  checked
-                />
-                <span>Baixar PDF (Lote)</span>
-              </label>
-            </div>
+                <!-- Pasta + botão -->
+                <div class="flex flex-col md:flex-row md:items-center gap-4 mt-2">
+                  <div class="flex-1">
+                    <label
+                      for="lotePastaDestino"
+                      class="block text-xs md:text-sm font-medium text-slate-700"
+                      >Pasta de destino (Lote)</label
+                    >
 
-            <!-- Pasta + botão BAIXAR TUDO no mesmo formato do manual -->
-            <div
-              class="flex flex-col md:flex-row md:items-center gap-4 mt-2"
-            >
-              <div class="flex-1">
-                <label
-                  for="lotePastaDestino"
-                  class="block text-sm font-medium text-slate-700"
-                  >Pasta de destino (Lote)</label
-                >
+                    <div class="flex flex-col md:flex-row gap-2">
+                      <button
+                        id="loteSelecionarPastaBtn"
+                        type="button"
+                        class="px-4 py-2 text-xs md:text-sm border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-700"
+                      >
+                        Selecionar pasta de destino
+                      </button>
 
-                <div class="flex flex-col md:flex-row gap-2">
+                      <input
+                        id="lotePastaDestino"
+                        type="text"
+                        class="mt-1 md:mt-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                        placeholder="Ex: downloads"
+                        value="downloads"
+                      />
+                    </div>
+
+                    <p class="mt-1 text-xs md:text-sm text-slate-500">
+                      Usada para criar
+                      <span class="font-medium">Entrada</span> e
+                      <span class="font-medium">Saída</span> para cada empresa.
+                    </p>
+                  </div>
+
                   <button
-                    id="loteSelecionarPastaBtn"
-                    type="button"
-                    class="px-4 py-2 text-xs md:text-sm border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-700"
+                    id="baixarTudoBtn"
+                    class="bg-primary-btn inline-flex items-center justify-center px-5 py-2.5 text-xs md:text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-black"
                   >
-                    Selecionar Pasta de Destino
+                    Baixar tudo (todas as empresas)
                   </button>
-
-                  <input
-                    id="lotePastaDestino"
-                    type="text"
-                    class="mt-1 md:mt-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    placeholder="Ex: downloads"
-                    value="downloads"
-                  />
                 </div>
-
-                <p class="mt-1 text-xs md:text-sm text-slate-500">
-                  O lote usará esta pasta para criar as subpastas
-                  <span class="font-medium">Entrada</span> e
-                  <span class="font-medium">Saída</span> no servidor.
-                </p>
               </div>
 
-              <button
-                id="baixarTudoBtn"
-                class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-              >
-                BAIXAR TUDO (Todas as Empresas)
-              </button>
-            </div>
-
-            <div class="mt-3">
-              <h4 class="text-sm font-semibold text-slate-700 mb-1">
-                Logs de Progresso (Lote)
-              </h4>
-
-              <div
-                id="logsLote"
-                class="min-h-[140px] max-h-72 overflow-y-auto text-xs md:text-sm font-mono 
-                       bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
-              >
-                <div class="text-slate-500">
-                  Nenhuma execução iniciada ainda.
+              <!-- Direita: logs do lote -->
+              <div class="bg-slate-100 rounded-xl p-4 border border-slate-300 flex flex-col">
+                <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
+                  Logs de progresso (Lote)
+                </h4>
+                <p class="text-[11px] text-slate-500 mb-2">
+                  Visualize o andamento da execução para cada empresa.
+                </p>
+                <div
+                  id="logsLote"
+                  class="min-h-[140px] max-h-72 overflow-y-auto text-xs md:text-sm font-mono
+                         bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300 flex-1"
+                >
+                  <div class="text-slate-500">Nenhuma execução iniciada ainda.</div>
                 </div>
               </div>
             </div>
@@ -569,14 +754,15 @@
         <!-- Painel Histórico -->
         <section
           id="tab-historico"
-          class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6"
+          class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
+                 min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
           <div>
             <h2 class="text-base font-semibold text-slate-800 mb-1">
-              Histórico de Execuções
+              Histórico de execuções
             </h2>
-            <p class="text-sm text-slate-500">
-              Todas as execuções do robô (manual e em lote) com data, empresa,
+            <p class="text-xs md:text-sm text-slate-500">
+              Todas as execuções do robô (manual e em lote), com data, empresa,
               status e quantidade de arquivos.
             </p>
           </div>
@@ -584,17 +770,15 @@
           <div class="flex items-center justify-between mb-2">
             <button
               id="btnReloadHistorico"
-              class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              class="inline-flex items-center justify-center px-4 py-2 text-xs md:text-sm font-medium rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             >
               Atualizar histórico
             </button>
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-sm border border-slate-200 rounded-xl">
-              <thead
-                class="bg-slate-100 text-slate-600 border-b border-slate-200"
-              >
+            <table class="w-full text-xs md:text-sm border border-slate-200 rounded-xl">
+              <thead class="bg-slate-100 text-slate-600 border-b border-slate-200">
                 <tr>
                   <th class="px-3 py-2 text-left">Data / Hora</th>
                   <th class="px-3 py-2 text-left">Empresa</th>
@@ -620,11 +804,17 @@
       </main>
     </div>
 
+    <script>
+      // Aplicar tema salvo ao carregar (classe no body)
+      (function () {
+        const savedTheme = localStorage.getItem("nfseTheme") || "light";
+        if (savedTheme === "dark") {
+          document.body.classList.add("dark-mode");
+        }
+      })();
+    </script>
+
     <script src="/js/dashboard.js"></script>
     <script src="/js/historico.js"></script>
   </body>
 </html>
-
-
-
-

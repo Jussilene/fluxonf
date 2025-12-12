@@ -16,23 +16,255 @@ const NFSE_PORTAL_URL =
   "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional";
 
 // ---------------------------------------------------------------------
+// ✅ PDF ROBUSTO: captura PDF por download OU popup OU response PDF
+// + fallback extra: se download vier "canceled", baixa via request autenticado
+// ---------------------------------------------------------------------
+function makeAbsoluteUrl(base, href) {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return href;
+  }
+}
+
+async function safeClickHandle(handle) {
+  try {
+    await handle.scrollIntoViewIfNeeded().catch(() => {});
+  } catch {}
+  // clique mais robusto que evita "not visible"
+  await handle
+    .evaluate((el) => {
+      if (!el) return;
+      try {
+        el.scrollIntoView({ block: "center", inline: "center" });
+      } catch {}
+      if (el instanceof HTMLElement) el.click();
+      else
+        el.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true })
+        );
+    })
+    .catch(async () => {
+      // fallback (se evaluate falhar)
+      await handle.click({ force: true }).catch(() => {});
+    });
+}
+
+async function baixarPdfPorRequest({ context, page, urlPdf, destinoPdf, log }) {
+  if (!urlPdf) throw new Error("URL do PDF não encontrada para fallback.");
+
+  const abs = makeAbsoluteUrl(page.url(), urlPdf);
+  log?.(`[BOT] (PDF) Tentando fallback via request autenticado: ${abs}`);
+
+  const resp = await context.request.get(abs).catch(() => null);
+  if (!resp) throw new Error("Falha ao executar request.get() para o PDF.");
+
+  const ok = resp.ok();
+  const status = resp.status();
+
+  if (!ok) {
+    throw new Error(`Request do PDF falhou (status ${status}).`);
+  }
+
+  const buffer = await resp.body().catch(() => null);
+  if (!buffer) throw new Error("Request OK, mas não consegui ler body() do PDF.");
+
+  fs.mkdirSync(path.dirname(destinoPdf), { recursive: true });
+  fs.writeFileSync(destinoPdf, buffer);
+
+  log?.(`[BOT] PDF (via request) salvo: ${destinoPdf}`);
+  return true;
+}
+
+async function baixarPdfRobusto({
+  context,
+  page,
+  clickPdfOption,
+  destinoPdf,
+  log,
+  pdfLinkHandle, // <-- handle do item do menu (para pegar href)
+}) {
+  fs.mkdirSync(path.dirname(destinoPdf), { recursive: true });
+
+  // Promises (não “morrem” se um caminho falhar)
+  const downloadPromise = page
+    .waitForEvent("download", { timeout: 15000 })
+    .catch(() => null);
+
+  const popupPromise = page
+    .waitForEvent("popup", { timeout: 15000 })
+    .catch(() => null);
+
+  const responsePromise = page
+    .waitForResponse(
+      (r) => {
+        const ct = (r.headers()["content-type"] || "").toLowerCase();
+        return ct.includes("application/pdf");
+      },
+      { timeout: 15000 }
+    )
+    .catch(() => null);
+
+  // clique
+  await clickPdfOption();
+
+  // Espera “o que vier primeiro”, mas se vier download cancelado,
+  // não para: tenta os outros caminhos e por fim fallback request.
+  const first = await Promise.race([
+    downloadPromise.then((d) => ({ type: "download", d })),
+    popupPromise.then((p) => ({ type: "popup", p })),
+    responsePromise.then((r) => ({ type: "response", r })),
+    new Promise((r) => setTimeout(() => r({ type: "timeout" }), 16000)),
+  ]);
+
+  // ---------------- response (PDF inline) ----------------
+  if (first.type === "response" && first.r) {
+    const resp = first.r;
+    if (!resp.ok()) throw new Error(`Response do PDF não OK (status ${resp.status()})`);
+
+    const buffer = await resp.body().catch(() => null);
+    if (!buffer) throw new Error("Response abriu, mas não consegui ler o body() do PDF.");
+
+    fs.writeFileSync(destinoPdf, buffer);
+    log?.(`[BOT] PDF (via response) salvo: ${destinoPdf}`);
+    return true;
+  }
+
+  // ---------------- popup ----------------
+  if (first.type === "popup" && first.p) {
+    const popup = first.p;
+
+    await popup.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+    await popup.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+
+    // tenta imprimir como PDF (quando for viewer HTML)
+    const buffer = await popup
+      .pdf({ format: "A4", printBackground: true })
+      .catch(() => null);
+
+    if (buffer) {
+      fs.writeFileSync(destinoPdf, buffer);
+      log?.(`[BOT] PDF (via popup.pdf) salvo: ${destinoPdf}`);
+      await popup.close().catch(() => {});
+      return true;
+    }
+
+    // fallback: tenta capturar response PDF dentro do popup
+    const respPdf = await popup
+      .waitForResponse(
+        (r) =>
+          (r.headers()["content-type"] || "")
+            .toLowerCase()
+            .includes("application/pdf"),
+        { timeout: 12000 }
+      )
+      .catch(() => null);
+
+    if (respPdf && respPdf.ok()) {
+      const buf2 = await respPdf.body().catch(() => null);
+      if (buf2) {
+        fs.writeFileSync(destinoPdf, buf2);
+        log?.(`[BOT] PDF (via response no popup) salvo: ${destinoPdf}`);
+        await popup.close().catch(() => {});
+        return true;
+      }
+    }
+
+    await popup.close().catch(() => {});
+    // último recurso: request pelo href do item do menu
+    let href = null;
+    try {
+      href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
+    } catch {}
+    return await baixarPdfPorRequest({ context, page, urlPdf: href, destinoPdf, log });
+  }
+
+  // ---------------- download ----------------
+  if (first.type === "download" && first.d) {
+    const download = first.d;
+
+    const failure = await download.failure().catch(() => null);
+
+    // ✅ Se o portal “cancela”, tentamos response/popup (se aconteceram) e, por fim, request
+    if (failure) {
+      if (String(failure).toLowerCase().includes("canceled")) {
+        // tenta ver se mesmo assim veio response pdf em paralelo
+        const resp = await responsePromise.catch(() => null);
+        if (resp && resp.ok()) {
+          const buffer = await resp.body().catch(() => null);
+          if (buffer) {
+            fs.writeFileSync(destinoPdf, buffer);
+            log?.(`[BOT] PDF (via response após cancelamento) salvo: ${destinoPdf}`);
+            return true;
+          }
+        }
+
+        // tenta popup em paralelo
+        const pop = await popupPromise.catch(() => null);
+        if (pop) {
+          await pop.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
+          const buffer = await pop
+            .pdf({ format: "A4", printBackground: true })
+            .catch(() => null);
+          if (buffer) {
+            fs.writeFileSync(destinoPdf, buffer);
+            log?.(`[BOT] PDF (via popup após cancelamento) salvo: ${destinoPdf}`);
+            await pop.close().catch(() => {});
+            return true;
+          }
+          await pop.close().catch(() => {});
+        }
+
+        // fallback final: request autenticado via href/url
+        let href = null;
+        try {
+          href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
+        } catch {}
+
+        // se não tiver href, tenta usar a URL do próprio download
+        const urlFallback = href || download.url?.() || null;
+
+        return await baixarPdfPorRequest({
+          context,
+          page,
+          urlPdf: urlFallback,
+          destinoPdf,
+          log,
+        });
+      }
+
+      throw new Error(`Falha no download do PDF: ${failure}`);
+    }
+
+    await download.saveAs(destinoPdf);
+    log?.(`[BOT] PDF salvo: ${destinoPdf}`);
+    return true;
+  }
+
+  // timeout / nada aconteceu → fallback request pelo href
+  let href = null;
+  try {
+    href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
+  } catch {}
+
+  if (href) {
+    return await baixarPdfPorRequest({ context, page, urlPdf: href, destinoPdf, log });
+  }
+
+  throw new Error("Não houve evento de download/popup/response para o PDF (timeout).");
+}
+
+// ---------------------------------------------------------------------
 // Helper para lançar o navegador (ajustado para servidor Linux)
 // ---------------------------------------------------------------------
 const isLinux = process.platform === "linux";
 
-// Sempre lançar o navegador do robô com as opções certas
 async function launchNFSEBrowser() {
   return await chromium.launch({
-    // no servidor (Linux) SEMPRE em headless
     headless: isLinux ? true : false,
-    // no servidor: rápido (0) | no Windows: devagar para visualização
     slowMo: isLinux ? 0 : 150,
     args: isLinux
-      ? [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-        ]
+      ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
       : [],
   });
 }
@@ -102,6 +334,13 @@ function extractCnpjLike(str) {
   return match[1].replace(/\D/g, "");
 }
 
+function buildPaths(pastaDestino, tipoNota) {
+  const baseDir = path.resolve(process.cwd(), pastaDestino || "downloads");
+  const subDir = tipoNota === "recebidas" ? "Entrada" : "Saida";
+  const finalDir = path.join(baseDir, subDir);
+  return { baseDir, subDir, finalDir };
+}
+
 // ---------------------------------------------------------------------
 // MODO 1 – SIMULAÇÃO
 // ---------------------------------------------------------------------
@@ -118,10 +357,13 @@ async function runManualDownloadSimulado(params = {}) {
     pastaDestino,
     empresaId,
     empresaNome,
-    modoExecucao, // "manual" | "lote"
+    modoExecucao,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
+
+  const paths = buildPaths(pastaDestino, tipoNota);
+  ensureDir(paths.finalDir);
 
   pushLog(
     `[BOT] (Debug) Modo SIMULAÇÃO ativo. NFSE_USE_PORTAL = "${
@@ -145,6 +387,10 @@ async function runManualDownloadSimulado(params = {}) {
   pushLog(`[BOT] Formatos: ${formatos.join(" + ") || "Nenhum"}`);
   pushLog(`[BOT] Pasta de destino: ${pastaDestino || "downloads"}`);
 
+  pushLog(
+    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
+  );
+
   pushLog("[BOT] (Simulação) Abrindo navegador automatizado...");
   pushLog("[BOT] (Simulação) Acessando portal da NFS-e...");
   pushLog("[BOT] (Simulação) Aplicando filtros de data e tipo de nota...");
@@ -153,7 +399,6 @@ async function runManualDownloadSimulado(params = {}) {
   pushLog("[BOT] (Simulação) Organizando arquivos nas pastas Entrada/Saída...");
   pushLog("[BOT] Download manual concluído com sucesso (simulação).");
 
-  // registra histórico também no modo simulado
   try {
     registrarExecucao({
       empresaId: empresaId || null,
@@ -167,11 +412,12 @@ async function runManualDownloadSimulado(params = {}) {
     console.error("[BOT] Erro ao registrar histórico (simulação):", err);
   }
 
-  return logs;
+  return { logs, paths };
 }
 
 // ---------------------------------------------------------------------
 // Helper: clicar e capturar arquivo usando evento de download do Playwright
+// ✅ mais estável com download.saveAs() (evita download.path(): canceled)
 // ---------------------------------------------------------------------
 async function clickAndCaptureFile({
   page,
@@ -179,8 +425,8 @@ async function clickAndCaptureFile({
   finalDir,
   tipoNota,
   pushLog,
-  extPreferida, // "pdf" | "xml" | null
-  arquivoIndexRef, // { value: number }
+  extPreferida,
+  arquivoIndexRef,
   linhaIndex,
 }) {
   try {
@@ -206,12 +452,11 @@ async function clickAndCaptureFile({
       return false;
     }
 
-    const tempPath = await download.path();
-    if (!tempPath) {
-      pushLog(
-        `[BOT] Aviso: Playwright não retornou caminho de arquivo para o download da linha ${linhaIndex}.`
+    const failure = await download.failure().catch(() => null);
+    if (failure) {
+      throw new Error(
+        `Falha no download (${extPreferida || "arquivo"}): ${failure}`
       );
-      return false;
     }
 
     let originalName = download.suggestedFilename() || "arquivo";
@@ -237,10 +482,9 @@ async function clickAndCaptureFile({
     const tipoSlug = tipoNota === "recebidas" ? "recebidas" : "emitidas";
     const cnpjParte = cnpj || `linha${linhaIndex}`;
     const newName = `${tipoSlug}-${cnpjParte}-${index}${ext}`;
-
     const savePath = path.join(finalDir, newName);
 
-    fs.copyFileSync(tempPath, savePath);
+    await download.saveAs(savePath);
 
     pushLog(
       `[BOT] Arquivo #${index} capturado na linha ${linhaIndex}. Original: "${originalName}" -> Novo nome: "${newName}". Caminho final: ${savePath}`
@@ -273,12 +517,11 @@ async function runManualDownloadPortal(params = {}) {
     senha: senhaParam,
     empresaId,
     empresaNome,
-    modoExecucao, // "manual" | "lote"
+    modoExecucao,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
 
-  // prioridade: 1) credenciais passadas no params  2) fallback para .env
   const login = loginParam || process.env.NFSE_USER;
   const senha = senhaParam || process.env.NFSE_PASSWORD;
 
@@ -286,27 +529,21 @@ async function runManualDownloadPortal(params = {}) {
     pushLog(
       "[BOT] Login/senha não informados para esta execução. Voltando para modo SIMULAÇÃO."
     );
-    const simLogs = await runManualDownloadSimulado({
+    const simResult = await runManualDownloadSimulado({
       ...params,
       modoExecucao,
       onLog,
     });
-    return logs.concat(simLogs);
+    return { logs: logs.concat(simResult.logs), paths: simResult.paths };
   }
 
-  // ------------------------------------------------------
-  // Pastas de destino (Entrada / Saida)
-  // ------------------------------------------------------
-  const baseDir = path.resolve(process.cwd(), pastaDestino || "downloads");
-  const subDir = tipoNota === "recebidas" ? "Entrada" : "Saida";
-  const finalDir = path.join(baseDir, subDir);
-  ensureDir(finalDir);
+  const paths = buildPaths(pastaDestino, tipoNota);
+  ensureDir(paths.finalDir);
 
   pushLog(
-    `[BOT] Pasta base de downloads: ${baseDir} | Subpasta: ${subDir} | Final: ${finalDir}`
+    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
   );
 
-  // *** AQUI usamos o helper para lançar o navegador ***
   const browser = await launchNFSEBrowser();
 
   const context = await browser.newContext({
@@ -320,9 +557,7 @@ async function runManualDownloadPortal(params = {}) {
   try {
     // 1) Abrir tela de login
     pushLog("[BOT] Abrindo portal nacional da NFS-e...");
-    await page.goto(NFSE_PORTAL_URL, {
-      waitUntil: "domcontentloaded",
-    });
+    await page.goto(NFSE_PORTAL_URL, { waitUntil: "domcontentloaded" });
     pushLog("[BOT] Página de login carregada.");
 
     // 2) Preencher login
@@ -434,12 +669,8 @@ async function runManualDownloadPortal(params = {}) {
       pushLog(
         "[BOT] Não consegui clicar no ícone do menu de notas. Tentando acessar pela URL direta..."
       );
-
       try {
-        await page.goto(targetUrl, {
-          waitUntil: "networkidle",
-          timeout: 20000,
-        });
+        await page.goto(targetUrl, { waitUntil: "networkidle", timeout: 20000 });
         const urlNotas = page.url();
         pushLog(
           `[BOT] Tela de notas aparentemente aberta pela URL direta. URL atual: ${urlNotas}`
@@ -462,7 +693,7 @@ async function runManualDownloadPortal(params = {}) {
         const diBr = formatDateBrFromISO(dataInicial);
         const dfBr = formatDateBrFromISO(dataFinal);
 
-        await page.waitForTimeout(500); // antes 1000
+        await page.waitForTimeout(500);
 
         const dataInicialInput =
           (await page.$(
@@ -481,12 +712,8 @@ async function runManualDownloadPortal(params = {}) {
           ));
 
         if ((dataInicialInput && diBr) || (dataFinalInput && dfBr)) {
-          if (dataInicialInput && diBr) {
-            await dataInicialInput.fill(diBr);
-          }
-          if (dataFinalInput && dfBr) {
-            await dataFinalInput.fill(dfBr);
-          }
+          if (dataInicialInput && diBr) await dataInicialInput.fill(diBr);
+          if (dataFinalInput && dfBr) await dataFinalInput.fill(dfBr);
 
           const botaoPesquisar =
             (await page.$(
@@ -498,7 +725,7 @@ async function runManualDownloadPortal(params = {}) {
 
           if (botaoPesquisar) {
             await botaoPesquisar.click();
-            await page.waitForTimeout(1500); // antes 3000
+            await page.waitForTimeout(1500);
             pushLog(
               `[BOT] Filtro de período aplicado pelos campos: ${buildPeriodoLabel(
                 dataInicial,
@@ -526,8 +753,7 @@ async function runManualDownloadPortal(params = {}) {
     }
 
     // 7) Ver se há tabela ou mensagem “Nenhum registro encontrado”
-    const textoPagina =
-      (await page.textContent("body").catch(() => "")) || "";
+    const textoPagina = (await page.textContent("body").catch(() => "")) || "";
 
     if (textoPagina.includes("Nenhum registro encontrado")) {
       pushLog(
@@ -538,22 +764,16 @@ async function runManualDownloadPortal(params = {}) {
       const rowHandles = await page.$$("table tbody tr");
       const rowCount = rowHandles.length;
 
-      pushLog(
-        `[BOT] Tabela de notas carregada. Linhas encontradas: ${rowCount}.`
-      );
+      pushLog(`[BOT] Tabela de notas carregada. Linhas encontradas: ${rowCount}.`);
 
       const dataInicialDate = dataInicial ? parseIsoToDate(dataInicial) : null;
       const dataFinalDate = dataFinal ? parseIsoToDate(dataFinal) : null;
 
       if (rowCount === 0) {
-        pushLog(
-          "[BOT] Aviso: nenhuma nota encontrada na tabela para o período informado."
-        );
+        pushLog("[BOT] Aviso: nenhuma nota encontrada na tabela para o período informado.");
       } else {
         if (!baixarXml && !baixarPdf) {
-          pushLog(
-            "[BOT] Nenhum formato selecionado (XML/PDF). Nada será baixado."
-          );
+          pushLog("[BOT] Nenhum formato selecionado (XML/PDF). Nada será baixado.");
         } else {
           let linhaIndex = 0;
 
@@ -625,7 +845,7 @@ async function runManualDownloadPortal(params = {}) {
               }
 
               await trigger.click({ force: true });
-              await page.waitForTimeout(200); // antes 400
+              await page.waitForTimeout(200);
 
               const menu =
                 (await menuWrapper.$(".menu-content")) ||
@@ -652,7 +872,7 @@ async function runManualDownloadPortal(params = {}) {
                   await clickAndCaptureFile({
                     page,
                     element: xmlLink,
-                    finalDir,
+                    finalDir: paths.finalDir,
                     tipoNota,
                     pushLog,
                     extPreferida: "xml",
@@ -681,16 +901,39 @@ async function runManualDownloadPortal(params = {}) {
                   pushLog(
                     `[BOT] Linha ${linhaIndex}: clicando na opção "Download DANFS-e"/PDF...`
                   );
-                  await clickAndCaptureFile({
-                    page,
-                    element: pdfLink,
-                    finalDir,
-                    tipoNota,
-                    pushLog,
-                    extPreferida: "pdf",
-                    arquivoIndexRef,
-                    linhaIndex,
-                  });
+
+                  // ✅ nome final do PDF (mesmo padrão emitidas/recebidas + linha + índice)
+                  const tipoSlug = tipoNota === "recebidas" ? "recebidas" : "emitidas";
+                  const destinoPdfPreview = `${tipoSlug}-linha${linhaIndex}-${
+                    arquivoIndexRef.value + 1
+                  }.pdf`;
+                  const destinoPdf = path.join(paths.finalDir, destinoPdfPreview);
+
+                  try {
+                    const ok = await baixarPdfRobusto({
+                      context,
+                      page,
+                      destinoPdf,
+                      log: (m) => pushLog(m),
+                      pdfLinkHandle: pdfLink,
+                      clickPdfOption: async () => {
+                        // clique robusto (evita not visible + dispara corretamente)
+                        await safeClickHandle(pdfLink);
+                      },
+                    });
+
+                    if (ok) {
+                      // só conta o arquivo se realmente salvou
+                      arquivoIndexRef.value += 1;
+                      pushLog(
+                        `[BOT] PDF registrado como arquivo #${arquivoIndexRef.value}.`
+                      );
+                    }
+                  } catch (e) {
+                    pushLog(
+                      `[BOT] Erro ao clicar/capturar PDF na linha ${linhaIndex}: ${e.message}`
+                    );
+                  }
                 } else {
                   pushLog(
                     `[BOT] Linha ${linhaIndex}: não encontrei item de menu para PDF/DANFS-e.`
@@ -698,7 +941,7 @@ async function runManualDownloadPortal(params = {}) {
                 }
               }
 
-              await page.waitForTimeout(150); // antes 300
+              await page.waitForTimeout(150);
             } catch (linhaErr) {
               pushLog(
                 `[BOT] Erro inesperado ao processar a linha ${linhaIndex}: ${linhaErr.message}`
@@ -717,9 +960,7 @@ async function runManualDownloadPortal(params = {}) {
     );
   } catch (err) {
     console.error("Erro no robô Playwright (portal nacional):", err);
-    pushLog(
-      `[BOT] ERRO durante a execução no portal nacional: ${err.message}`
-    );
+    pushLog(`[BOT] ERRO durante a execução no portal nacional: ${err.message}`);
     teveErro = true;
   } finally {
     await browser.close();
@@ -743,7 +984,7 @@ async function runManualDownloadPortal(params = {}) {
   }
 
   pushLog("[BOT] Fluxo MVP (portal nacional) finalizado.");
-  return logs;
+  return { logs, paths };
 }
 
 // ---------------------------------------------------------------------
@@ -767,7 +1008,7 @@ export async function runManualDownload(params = {}) {
 }
 
 // ---------------------------------------------------------------------
-// Execução em LOTE (agora REAL quando NFSE_USE_PORTAL=true)
+// Execução em LOTE (REAL quando NFSE_USE_PORTAL=true)
 // ---------------------------------------------------------------------
 export async function runLoteDownload(empresas = [], options = {}) {
   const {
@@ -783,27 +1024,29 @@ export async function runLoteDownload(empresas = [], options = {}) {
   const { logs, pushLog } = createLogger(onLog);
   const usePortal = process.env.NFSE_USE_PORTAL === "true";
 
+  const paths = buildPaths(pastaDestino, tipoNota);
+  ensureDir(paths.finalDir);
+
   pushLog(
     `[BOT] Iniciando execução em lote (${
       usePortal ? "MODO REAL (portal nacional)" : "SIMULAÇÃO"
     })...`
   );
 
+  pushLog(
+    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
+  );
+
   if (!Array.isArray(empresas) || empresas.length === 0) {
     pushLog("[BOT] Nenhuma empresa cadastrada para executar em lote.");
-    return logs;
+    return { logs, paths };
   }
 
   for (const emp of empresas) {
-    pushLog(
-      "--------------------------------------------------------------"
-    );
-    pushLog(
-      `[BOT] Processando empresa: ${emp.nome} (CNPJ: ${emp.cnpj})...`
-    );
+    pushLog("--------------------------------------------------------------");
+    pushLog(`[BOT] Processando empresa: ${emp.nome} (CNPJ: ${emp.cnpj})...`);
 
     if (usePortal) {
-      // Aqui o lote só roda REAL se a empresa tiver login/senha configurados
       const login = emp.loginPortal || emp.cnpj || null;
       const senha = emp.senhaPortal || null;
 
@@ -826,12 +1069,9 @@ export async function runLoteDownload(empresas = [], options = {}) {
         empresaId: emp.id || emp.cnpj,
         empresaNome: emp.nome,
         modoExecucao: "lote",
-        onLog: (msg) => {
-          pushLog(msg);
-        },
+        onLog: (msg) => pushLog(msg),
       });
     } else {
-      // Modo simulado global
       await runManualDownloadSimulado({
         dataInicial,
         dataFinal,
@@ -842,22 +1082,17 @@ export async function runLoteDownload(empresas = [], options = {}) {
         empresaId: emp.id || emp.cnpj,
         empresaNome: emp.nome,
         modoExecucao: "lote",
-        onLog: (msg) => {
-          pushLog(msg);
-        },
+        onLog: (msg) => pushLog(msg),
       });
     }
   }
 
-  pushLog(
-    "--------------------------------------------------------------"
-  );
+  pushLog("--------------------------------------------------------------");
   pushLog(
     `[BOT] Execução em lote finalizada com sucesso (${
       usePortal ? "modo REAL / portal" : "simulação"
     }).`
   );
 
-  return logs;
+  return { logs, paths };
 }
-

@@ -46,6 +46,54 @@ if (logoutBtn) {
 }
 
 // ---------------------------
+// Tema claro/escuro (switch)
+// ---------------------------
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const themeToggleKnob = document.getElementById("themeToggleKnob");
+const themeSunIcon = document.getElementById("themeSunIcon");
+const themeMoonIcon = document.getElementById("themeMoonIcon");
+
+function applyThemeUI(isDark) {
+  document.body.classList.toggle("dark-mode", isDark);
+  localStorage.setItem("nfseTheme", isDark ? "dark" : "light");
+  if (themeToggleBtn) themeToggleBtn.setAttribute("aria-checked", String(isDark));
+
+  if (themeToggleKnob) {
+    themeToggleKnob.classList.toggle("translate-x-[40px]", isDark);
+
+    themeToggleKnob.classList.toggle("bg-slate-900", isDark);
+    themeToggleKnob.classList.toggle("border-slate-700", isDark);
+
+    themeToggleKnob.classList.toggle("bg-white", !isDark);
+    themeToggleKnob.classList.toggle("border-slate-200", !isDark);
+  }
+
+  if (themeSunIcon) {
+    themeSunIcon.classList.toggle("text-slate-700", !isDark);
+    themeSunIcon.classList.toggle("text-slate-400", isDark);
+  }
+
+  if (themeMoonIcon) {
+    themeMoonIcon.classList.toggle("text-slate-400", !isDark);
+    themeMoonIcon.classList.toggle("text-slate-200", isDark);
+  }
+}
+
+// estado inicial pelo localStorage/body
+(function initTheme() {
+  const savedTheme = localStorage.getItem("nfseTheme") || "light";
+  const startDark = savedTheme === "dark";
+  applyThemeUI(startDark);
+})();
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener("click", () => {
+    const willBeDark = !document.body.classList.contains("dark-mode");
+    applyThemeUI(willBeDark);
+  });
+}
+
+// ---------------------------
 // Tabs
 // ---------------------------
 const tabButtons = document.querySelectorAll(".tab-btn");
@@ -54,9 +102,9 @@ const tabPanels = document.querySelectorAll(".tab-panel");
 function activateTab(tabName) {
   tabButtons.forEach((btn) => {
     const isActive = btn.dataset.tab === tabName;
-    btn.classList.toggle("border-sky-500", isActive);
-    btn.classList.toggle("text-sky-700", isActive);
-    btn.classList.toggle("bg-sky-50", isActive);
+    btn.classList.toggle("border-slate-900", isActive);
+    btn.classList.toggle("text-slate-900", isActive);
+    btn.classList.toggle("bg-slate-100", isActive);
   });
 
   tabPanels.forEach((panel) => {
@@ -92,6 +140,51 @@ function clearLogs(element) {
 }
 
 // ---------------------------
+// ✅ AJUSTE: esconder campo/botão de "copiar caminho" (se ainda existir no HTML)
+// ---------------------------
+function hideServerPathUI() {
+  const idsToHide = [
+    "serverPathManual",
+    "copyServerPathManual",
+    "serverPathLote",
+    "copyServerPathLote",
+  ];
+
+  idsToHide.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    el.style.display = "none";
+
+    const maybeContainer =
+      el.closest(".flex") ||
+      el.closest(".grid") ||
+      el.closest(".space-y-2") ||
+      el.parentElement;
+
+    if (maybeContainer && maybeContainer !== document.body) {
+      maybeContainer.style.display = "none";
+    }
+  });
+}
+
+hideServerPathUI();
+
+// ---------------------------
+// ✅ NOVO: baixar ZIP automaticamente quando o backend retornar downloadZipUrl
+// ---------------------------
+function triggerZipDownload(zipUrl) {
+  if (!zipUrl) return;
+
+  const a = document.createElement("a");
+  a.href = zipUrl;
+  a.download = ""; // deixa o navegador decidir o nome do arquivo
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// ---------------------------
 // Helper: pegar config atual de download (bloco principal)
 // ---------------------------
 function getDownloadConfig() {
@@ -104,9 +197,7 @@ function getDownloadConfig() {
   const manualLoginEl = document.getElementById("manualLoginPortal");
   const manualSenhaEl = document.getElementById("manualSenhaPortal");
 
-  const tipoNotaRadio = document.querySelector(
-    "input[name='tipoNota']:checked"
-  );
+  const tipoNotaRadio = document.querySelector("input[name='tipoNota']:checked");
   const tipoNota = tipoNotaRadio ? tipoNotaRadio.value : "emitidas";
 
   return {
@@ -116,17 +207,9 @@ function getDownloadConfig() {
     baixarXml: !!(baixarXmlEl && baixarXmlEl.checked),
     baixarPdf: !!(baixarPdfEl && baixarPdfEl.checked),
     pastaDestino:
-      pastaDestinoEl && pastaDestinoEl.value
-        ? pastaDestinoEl.value
-        : "downloads",
-    login:
-      manualLoginEl && manualLoginEl.value.trim()
-        ? manualLoginEl.value.trim()
-        : null,
-    senha:
-      manualSenhaEl && manualSenhaEl.value
-        ? manualSenhaEl.value
-        : null,
+      pastaDestinoEl && pastaDestinoEl.value ? pastaDestinoEl.value : "downloads",
+    login: manualLoginEl && manualLoginEl.value.trim() ? manualLoginEl.value.trim() : null,
+    senha: manualSenhaEl && manualSenhaEl.value ? manualSenhaEl.value : null,
   };
 }
 
@@ -235,12 +318,13 @@ window.addEventListener("DOMContentLoaded", () => {
   if (pastaDestinoInput && lotePastaDestinoInput) {
     lotePastaDestinoInput.value = pastaDestinoInput.value || "downloads";
   }
+
+  hideServerPathUI();
 });
 
 // ---------------------------
 // Botões (abrir navegador / pasta / download / lote)
 // ---------------------------
-
 const abrirNavegadorBtn = document.getElementById("abrirNavegadorBtn");
 if (abrirNavegadorBtn) {
   abrirNavegadorBtn.addEventListener("click", () => {
@@ -267,7 +351,6 @@ if (selecionarPastaBtn && pastaDestinoInput) {
     );
     if (resposta && resposta.trim()) {
       pastaDestinoInput.value = resposta.trim();
-      // se existir campo do lote, acompanha também
       if (lotePastaDestinoInput) {
         lotePastaDestinoInput.value = resposta.trim();
       }
@@ -275,7 +358,7 @@ if (selecionarPastaBtn && pastaDestinoInput) {
   });
 }
 
-// Selecionar pasta específica do lote (visual igual, lógica reaproveita pastaDestino)
+// Selecionar pasta específica do lote
 if (loteSelecionarPastaBtn && lotePastaDestinoInput) {
   loteSelecionarPastaBtn.addEventListener("click", () => {
     const atual =
@@ -307,10 +390,7 @@ if (iniciarDownloadBtn) {
       return;
     }
 
-    addLog(
-      logsDownload,
-      "[INFO] Enviando requisição para o robô de download de NFS-e..."
-    );
+    addLog(logsDownload, "[INFO] Enviando requisição para o robô de download de NFS-e...");
 
     try {
       const res = await fetch("/api/nf/manual", {
@@ -320,20 +400,14 @@ if (iniciarDownloadBtn) {
       });
 
       if (!res.ok) {
-        addLog(
-          logsDownload,
-          `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`
-        );
+        addLog(logsDownload, `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`);
         return;
       }
 
       const data = await res.json();
 
       if (!data.success) {
-        addLog(
-          logsDownload,
-          "[ERRO] O robô não conseguiu concluir o download."
-        );
+        addLog(logsDownload, "[ERRO] O robô não conseguiu concluir o download.");
         if (data.error) addLog(logsDownload, `Detalhe: ${data.error}`);
         return;
       }
@@ -341,17 +415,21 @@ if (iniciarDownloadBtn) {
       if (Array.isArray(data.logs) && data.logs.length > 0) {
         data.logs.forEach((msg) => addLog(logsDownload, msg));
       } else {
-        addLog(
-          logsDownload,
-          "[OK] Download concluído. (Sem logs detalhados retornados.)"
-        );
+        addLog(logsDownload, "[OK] Download concluído. (Sem logs detalhados retornados.)");
       }
+
+      // ✅ baixar ZIP se o backend retornar
+      if (data.downloadZipUrl) {
+        addLog(logsDownload, `[OK] ZIP gerado. Baixando: ${data.downloadZipUrl}`);
+        triggerZipDownload(data.downloadZipUrl);
+      } else {
+        addLog(logsDownload, "[AVISO] Nenhum ZIP retornado pelo servidor (pode não ter encontrado pasta final).");
+      }
+
+      hideServerPathUI();
     } catch (err) {
       console.error(err);
-      addLog(
-        logsDownload,
-        "[ERRO] Erro inesperado ao comunicar com o servidor."
-      );
+      addLog(logsDownload, "[ERRO] Erro inesperado ao comunicar com o servidor.");
     }
   });
 }
@@ -361,12 +439,10 @@ if (baixarTudoBtn) {
   baixarTudoBtn.addEventListener("click", async () => {
     clearLogs(logsLote);
 
-    // sincronia do lote -> bloco principal
     syncLotePeriodoToMain();
     syncLoteTipoToMain();
     syncLoteFormatosToMain();
 
-    // sincroniza pasta do lote -> pastaDestino principal (sem mudar getDownloadConfig)
     if (lotePastaDestinoInput && pastaDestinoInput) {
       pastaDestinoInput.value =
         lotePastaDestinoInput.value && lotePastaDestinoInput.value.trim()
@@ -376,10 +452,7 @@ if (baixarTudoBtn) {
 
     const config = getDownloadConfig();
 
-    addLog(
-      logsLote,
-      "[INFO] Enviando requisição para execução em lote (todas as empresas)..."
-    );
+    addLog(logsLote, "[INFO] Enviando requisição para execução em lote (todas as empresas)...");
 
     try {
       const res = await fetch("/api/nf/lote", {
@@ -389,20 +462,16 @@ if (baixarTudoBtn) {
       });
 
       if (!res.ok) {
-        addLog(
-          logsLote,
-          `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`
-        );
+        const txt = await res.text().catch(() => "");
+        addLog(logsLote, `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`);
+        if (txt) addLog(logsLote, `Detalhe: ${txt}`);
         return;
       }
 
       const data = await res.json();
 
       if (!data.success) {
-        addLog(
-          logsLote,
-          "[ERRO] O robô não conseguiu concluir a execução em lote."
-        );
+        addLog(logsLote, "[ERRO] O robô não conseguiu concluir a execução em lote.");
         if (data.error) addLog(logsLote, `Detalhe: ${data.error}`);
         return;
       }
@@ -410,17 +479,21 @@ if (baixarTudoBtn) {
       if (Array.isArray(data.logs) && data.logs.length > 0) {
         data.logs.forEach((msg) => addLog(logsLote, msg));
       } else {
-        addLog(
-          logsLote,
-          "[OK] Execução em lote concluída. (Sem logs detalhados retornados.)"
-        );
+        addLog(logsLote, "[OK] Execução em lote concluída. (Sem logs detalhados retornados.)");
       }
+
+      // ✅ baixar ZIP se o backend retornar
+      if (data.downloadZipUrl) {
+        addLog(logsLote, `[OK] ZIP do lote gerado. Baixando: ${data.downloadZipUrl}`);
+        triggerZipDownload(data.downloadZipUrl);
+      } else {
+        addLog(logsLote, "[AVISO] Nenhum ZIP retornado pelo servidor (pode não ter encontrado pasta final).");
+      }
+
+      hideServerPathUI();
     } catch (err) {
       console.error(err);
-      addLog(
-        logsLote,
-        "[ERRO] Erro inesperado ao comunicar com o servidor."
-      );
+      addLog(logsLote, "[ERRO] Erro inesperado ao comunicar com o servidor.");
     }
   });
 }
@@ -454,8 +527,7 @@ function renderEmpresas() {
 
   empresas.forEach((emp) => {
     const tr = document.createElement("tr");
-    tr.className =
-      "border-t border-slate-100 hover:bg-sky-50 cursor-pointer";
+    tr.className = "border-t border-slate-100 hover:bg-sky-50 cursor-pointer";
     tr.dataset.id = emp.id;
 
     tr.innerHTML = `
@@ -544,8 +616,7 @@ if (salvarEmpresaBtn) {
       if (senhaPortalEl) senhaPortalEl.value = "";
 
       if (feedback) {
-        feedback.textContent =
-          "Empresa salva com sucesso (armazenada no backend).";
+        feedback.textContent = "Empresa salva com sucesso (armazenada no backend).";
         feedback.classList.remove("hidden");
         feedback.classList.remove("text-rose-600");
         feedback.classList.add("text-emerald-600");
@@ -553,8 +624,7 @@ if (salvarEmpresaBtn) {
     } catch (err) {
       console.error("Erro ao salvar empresa:", err);
       if (feedback) {
-        feedback.textContent =
-          "Erro inesperado ao comunicar com o servidor.";
+        feedback.textContent = "Erro inesperado ao comunicar com o servidor.";
         feedback.classList.remove("hidden");
         feedback.classList.remove("text-emerald-600");
         feedback.classList.add("text-rose-600");
