@@ -1,23 +1,262 @@
 // src/bot/nfseBot.js
-// Bot de NFSe com dois modos:
-// - SIMULAÇÃO (sem Playwright, só logs)
-// - PORTAL_NACIONAL (usa Playwright no portal https://www.nfse.gov.br/EmissorNacional)
-//
-// O modo é controlado pela env NFSE_USE_PORTAL:
-//   NFSE_USE_PORTAL=false  -> só simulação
-//   NFSE_USE_PORTAL=true   -> tenta usar o portal nacional
-
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
-import { registrarExecucao } from "../models/historico.model.js"; // <-- HISTÓRICO
+import { registrarExecucao } from "../models/historico.model.js";
 
 const NFSE_PORTAL_URL =
+  process.env.NFSE_PORTAL_URL ||
   "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional";
 
+const isLinux = process.platform === "linux";
+
+async function launchNFSEBrowser() {
+  return await chromium.launch({
+    headless: isLinux ? true : false,
+    slowMo: isLinux ? 0 : 150,
+    args: isLinux
+      ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+      : [],
+  });
+}
+
+// --------------------
+// Helpers de data
+// --------------------
+function formatDateBrFromISO(isoDate) {
+  if (!isoDate) return null;
+  const [year, month, day] = isoDate.split("-");
+  if (!year || !month || !day) return null;
+  return `${day}/${month}/${year}`;
+}
+
+function buildPeriodoLabel(dataInicial, dataFinal) {
+  const di = dataInicial ? formatDateBrFromISO(dataInicial) : null;
+  const df = dataFinal ? formatDateBrFromISO(dataFinal) : null;
+
+  if (!di && !df) return "N/D até N/D";
+  if (di && !df) return `${di} até N/D`;
+  if (!di && df) return `N/D até ${df}`;
+  return `${di} até ${df}`;
+}
+
+function parseBrDateToDate(str) {
+  if (!str) return null;
+  const match = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!match) return null;
+  const [, dd, mm, yyyy] = match;
+  return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+}
+
+function parseIsoToDate(iso) {
+  if (!iso) return null;
+  const [yyyy, mm, dd] = iso.split("-");
+  if (!yyyy || !mm || !dd) return null;
+  return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+}
+
+function periodKey(dataInicial, dataFinal) {
+  const di = (dataInicial || "sem-data").slice(0, 10);
+  const df = (dataFinal || "sem-data").slice(0, 10);
+  return `${di}_a_${df}`;
+}
+
+// --------------------
+// Logger
+// --------------------
+function createLogger(onLog) {
+  const logs = [];
+  const pushLog = (msg) => {
+    logs.push(msg);
+    if (onLog) onLog(msg);
+  };
+  return { logs, pushLog };
+}
+
+// --------------------
+// FS helpers
+// --------------------
+function ensureDir(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    console.error("[NFSE] Erro ao criar pasta:", dirPath, err);
+  }
+}
+
+function extractCnpjLike(str) {
+  if (!str) return null;
+  const match = str.match(/(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/);
+  if (!match) return null;
+  return match[1].replace(/\D/g, "");
+}
+
+// --------------------
+// ✅ estrutura por job (SEM criar pastas de tipo automaticamente)
+// downloads/jobs/<periodo>/<timestamp>  (apenas jobDir)
+// --------------------
+function buildJobPaths(pastaDestino, dataInicial, dataFinal) {
+  const baseDir = path.resolve(process.cwd(), pastaDestino || "downloads");
+  const jobsRoot = path.join(baseDir, "jobs", periodKey(dataInicial, dataFinal));
+  ensureDir(jobsRoot);
+
+  const jobDir = path.join(jobsRoot, String(Date.now()));
+  ensureDir(jobDir);
+
+  // ❗ não cria Emitidas/Recebidas/Canceladas aqui
+  const emitidasDir = path.join(jobDir, "Emitidas");
+  const recebidasDir = path.join(jobDir, "Recebidas");
+  const canceladasDir = path.join(jobDir, "Canceladas");
+
+  return { baseDir, jobDir, emitidasDir, recebidasDir, canceladasDir };
+}
+
+function getTipoDirFromRoot(rootJobDir, tipoNota) {
+  if (tipoNota === "recebidas") return path.join(rootJobDir, "Recebidas");
+  if (tipoNota === "canceladas") return path.join(rootJobDir, "Canceladas");
+  return path.join(rootJobDir, "Emitidas");
+}
+
 // ---------------------------------------------------------------------
-// ✅ PDF ROBUSTO: captura PDF por download OU popup OU response PDF
-// + fallback extra: se download vier "canceled", baixa via request autenticado
+// ✅ Canceladas robusto
+// Agora funciona com coluna "Situação" sendo ÍCONE (sem texto):
+// lê title/tooltip/aria-label/data-original-title ou HTML interno.
+// ---------------------------------------------------------------------
+function normalizeText(s = "") {
+  return String(s)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function normalizeStatus(s = "") {
+  return normalizeText(s);
+}
+
+async function findSituacaoColumnIndex(page) {
+  try {
+    const headers = page.locator("table thead tr th");
+    const count = await headers.count().catch(() => 0);
+
+    for (let i = 0; i < count; i++) {
+      const h = normalizeStatus(await headers.nth(i).innerText().catch(() => ""));
+      if (h.includes("SITUA") || h.includes("STATUS")) {
+        return i;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return -1;
+}
+
+async function readSituacaoSignalsFromCell(cellHandle) {
+  // tenta pegar texto + atributos (tooltip) do próprio TD e de elementos internos
+  try {
+    const payload = await cellHandle.evaluate((cell) => {
+      const pickAttrs = (el) => {
+        if (!el) return [];
+        const out = [];
+        const attrs = [
+          "title",
+          "aria-label",
+          "data-original-title",
+          "data-bs-original-title",
+          "data-tooltip",
+        ];
+        for (const a of attrs) {
+          const v = el.getAttribute && el.getAttribute(a);
+          if (v) out.push(v);
+        }
+        return out;
+      };
+
+      const texts = [];
+      const attrs = [];
+
+      // texto do TD
+      try {
+        const t = (cell.innerText || "").trim();
+        if (t) texts.push(t);
+      } catch {}
+
+      // attrs do TD
+      attrs.push(...pickAttrs(cell));
+
+      // procurar elementos com tooltip
+      const els = cell.querySelectorAll(
+        "[title],[aria-label],[data-original-title],[data-bs-original-title],[data-tooltip]"
+      );
+
+      // limita para não explodir
+      const max = Math.min(els.length, 15);
+      for (let i = 0; i < max; i++) {
+        attrs.push(...pickAttrs(els[i]));
+      }
+
+      // html bruto (às vezes tem 'cancelada' em classes/labels)
+      const html = cell.innerHTML || "";
+
+      return { texts, attrs, html };
+    });
+
+    return {
+      texts: Array.isArray(payload?.texts) ? payload.texts : [],
+      attrs: Array.isArray(payload?.attrs) ? payload.attrs : [],
+      html: typeof payload?.html === "string" ? payload.html : "",
+    };
+  } catch {
+    return { texts: [], attrs: [], html: "" };
+  }
+}
+
+async function isRowCanceladaBySituacaoIdx(rowHandle, situacaoIdx) {
+  if (situacaoIdx < 0) {
+    return { isCancelled: false, statusRaw: "", statusNorm: "" };
+  }
+
+  try {
+    const cells = await rowHandle.$$("td");
+    const cell = cells?.[situacaoIdx] || null;
+    if (!cell) return { isCancelled: false, statusRaw: "", statusNorm: "" };
+
+    // 1) tenta texto direto
+    const rawText = ((await cell.innerText().catch(() => "")) || "").trim();
+
+    // 2) se não tem texto, lê tooltip/attrs/html
+    const signals = await readSituacaoSignalsFromCell(cell);
+
+    const allParts = [
+      rawText,
+      ...(signals.texts || []),
+      ...(signals.attrs || []),
+      signals.html || "",
+    ]
+      .filter(Boolean)
+      .map((x) => String(x));
+
+    const joinedRaw = allParts.join(" | ").trim();
+    const norm = normalizeStatus(joinedRaw);
+
+    // regra de cancelada:
+    const isCancelled =
+      (norm.includes("CANCELAD") || norm.includes("NFS-E CANCELAD") || norm.includes("NFSE CANCELAD")) &&
+      !norm.includes("CANCELAR");
+
+    return {
+      isCancelled,
+      statusRaw: joinedRaw || rawText || "",
+      statusNorm: norm || "",
+    };
+  } catch {
+    return { isCancelled: false, statusRaw: "", statusNorm: "" };
+  }
+}
+
+// ---------------------------------------------------------------------
+// PDF robusto (mantido)
 // ---------------------------------------------------------------------
 function makeAbsoluteUrl(base, href) {
   try {
@@ -31,7 +270,6 @@ async function safeClickHandle(handle) {
   try {
     await handle.scrollIntoViewIfNeeded().catch(() => {});
   } catch {}
-  // clique mais robusto que evita "not visible"
   await handle
     .evaluate((el) => {
       if (!el) return;
@@ -39,13 +277,9 @@ async function safeClickHandle(handle) {
         el.scrollIntoView({ block: "center", inline: "center" });
       } catch {}
       if (el instanceof HTMLElement) el.click();
-      else
-        el.dispatchEvent(
-          new MouseEvent("click", { bubbles: true, cancelable: true })
-        );
+      else el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     })
     .catch(async () => {
-      // fallback (se evaluate falhar)
       await handle.click({ force: true }).catch(() => {});
     });
 }
@@ -82,19 +316,12 @@ async function baixarPdfRobusto({
   clickPdfOption,
   destinoPdf,
   log,
-  pdfLinkHandle, // <-- handle do item do menu (para pegar href)
+  pdfLinkHandle,
 }) {
   fs.mkdirSync(path.dirname(destinoPdf), { recursive: true });
 
-  // Promises (não “morrem” se um caminho falhar)
-  const downloadPromise = page
-    .waitForEvent("download", { timeout: 15000 })
-    .catch(() => null);
-
-  const popupPromise = page
-    .waitForEvent("popup", { timeout: 15000 })
-    .catch(() => null);
-
+  const downloadPromise = page.waitForEvent("download", { timeout: 15000 }).catch(() => null);
+  const popupPromise = page.waitForEvent("popup", { timeout: 15000 }).catch(() => null);
   const responsePromise = page
     .waitForResponse(
       (r) => {
@@ -105,11 +332,8 @@ async function baixarPdfRobusto({
     )
     .catch(() => null);
 
-  // clique
   await clickPdfOption();
 
-  // Espera “o que vier primeiro”, mas se vier download cancelado,
-  // não para: tenta os outros caminhos e por fim fallback request.
   const first = await Promise.race([
     downloadPromise.then((d) => ({ type: "download", d })),
     popupPromise.then((p) => ({ type: "popup", p })),
@@ -117,7 +341,6 @@ async function baixarPdfRobusto({
     new Promise((r) => setTimeout(() => r({ type: "timeout" }), 16000)),
   ]);
 
-  // ---------------- response (PDF inline) ----------------
   if (first.type === "response" && first.r) {
     const resp = first.r;
     if (!resp.ok()) throw new Error(`Response do PDF não OK (status ${resp.status()})`);
@@ -130,17 +353,13 @@ async function baixarPdfRobusto({
     return true;
   }
 
-  // ---------------- popup ----------------
   if (first.type === "popup" && first.p) {
     const popup = first.p;
 
     await popup.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
     await popup.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
 
-    // tenta imprimir como PDF (quando for viewer HTML)
-    const buffer = await popup
-      .pdf({ format: "A4", printBackground: true })
-      .catch(() => null);
+    const buffer = await popup.pdf({ format: "A4", printBackground: true }).catch(() => null);
 
     if (buffer) {
       fs.writeFileSync(destinoPdf, buffer);
@@ -149,13 +368,9 @@ async function baixarPdfRobusto({
       return true;
     }
 
-    // fallback: tenta capturar response PDF dentro do popup
     const respPdf = await popup
       .waitForResponse(
-        (r) =>
-          (r.headers()["content-type"] || "")
-            .toLowerCase()
-            .includes("application/pdf"),
+        (r) => (r.headers()["content-type"] || "").toLowerCase().includes("application/pdf"),
         { timeout: 12000 }
       )
       .catch(() => null);
@@ -171,7 +386,6 @@ async function baixarPdfRobusto({
     }
 
     await popup.close().catch(() => {});
-    // último recurso: request pelo href do item do menu
     let href = null;
     try {
       href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
@@ -179,16 +393,13 @@ async function baixarPdfRobusto({
     return await baixarPdfPorRequest({ context, page, urlPdf: href, destinoPdf, log });
   }
 
-  // ---------------- download ----------------
   if (first.type === "download" && first.d) {
     const download = first.d;
 
     const failure = await download.failure().catch(() => null);
 
-    // ✅ Se o portal “cancela”, tentamos response/popup (se aconteceram) e, por fim, request
     if (failure) {
       if (String(failure).toLowerCase().includes("canceled")) {
-        // tenta ver se mesmo assim veio response pdf em paralelo
         const resp = await responsePromise.catch(() => null);
         if (resp && resp.ok()) {
           const buffer = await resp.body().catch(() => null);
@@ -199,13 +410,10 @@ async function baixarPdfRobusto({
           }
         }
 
-        // tenta popup em paralelo
         const pop = await popupPromise.catch(() => null);
         if (pop) {
           await pop.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
-          const buffer = await pop
-            .pdf({ format: "A4", printBackground: true })
-            .catch(() => null);
+          const buffer = await pop.pdf({ format: "A4", printBackground: true }).catch(() => null);
           if (buffer) {
             fs.writeFileSync(destinoPdf, buffer);
             log?.(`[BOT] PDF (via popup após cancelamento) salvo: ${destinoPdf}`);
@@ -215,14 +423,12 @@ async function baixarPdfRobusto({
           await pop.close().catch(() => {});
         }
 
-        // fallback final: request autenticado via href/url
         let href = null;
         try {
           href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
         } catch {}
 
-        // se não tiver href, tenta usar a URL do próprio download
-        const urlFallback = href || download.url?.() || null;
+        const urlFallback = href || (download.url ? download.url() : null) || null;
 
         return await baixarPdfPorRequest({
           context,
@@ -241,7 +447,6 @@ async function baixarPdfRobusto({
     return true;
   }
 
-  // timeout / nada aconteceu → fallback request pelo href
   let href = null;
   try {
     href = pdfLinkHandle ? await pdfLinkHandle.getAttribute("href") : null;
@@ -255,169 +460,8 @@ async function baixarPdfRobusto({
 }
 
 // ---------------------------------------------------------------------
-// Helper para lançar o navegador (ajustado para servidor Linux)
-// ---------------------------------------------------------------------
-const isLinux = process.platform === "linux";
-
-async function launchNFSEBrowser() {
-  return await chromium.launch({
-    headless: isLinux ? true : false,
-    slowMo: isLinux ? 0 : 150,
-    args: isLinux
-      ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-      : [],
-  });
-}
-
-// ---------------------------------------------------------------------
-// Helpers de datas (para filtro e logs)
-// ---------------------------------------------------------------------
-function formatDateBrFromISO(isoDate) {
-  if (!isoDate) return null;
-  const [year, month, day] = isoDate.split("-");
-  if (!year || !month || !day) return null;
-  return `${day}/${month}/${year}`;
-}
-
-function buildPeriodoLabel(dataInicial, dataFinal) {
-  const di = dataInicial ? formatDateBrFromISO(dataInicial) : null;
-  const df = dataFinal ? formatDateBrFromISO(dataFinal) : null;
-
-  if (!di && !df) return "N/D até N/D";
-  if (di && !df) return `${di} até N/D`;
-  if (!di && df) return `N/D até ${df}`;
-  return `${di} até ${df}`;
-}
-
-function parseBrDateToDate(str) {
-  if (!str) return null;
-  const match = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!match) return null;
-  const [, dd, mm, yyyy] = match;
-  return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-}
-
-function parseIsoToDate(iso) {
-  if (!iso) return null;
-  const [yyyy, mm, dd] = iso.split("-");
-  if (!yyyy || !mm || !dd) return null;
-  return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-}
-
-// ---------------------------------------------------------------------
-// Função auxiliar de logs
-// ---------------------------------------------------------------------
-function createLogger(onLog) {
-  const logs = [];
-  const pushLog = (msg) => {
-    logs.push(msg);
-    if (onLog) onLog(msg);
-  };
-  return { logs, pushLog };
-}
-
-// ---------------------------------------------------------------------
-// Helpers para pastas e nomes de arquivo
-// ---------------------------------------------------------------------
-function ensureDir(dirPath) {
-  try {
-    fs.mkdirSync(dirPath, { recursive: true });
-  } catch (err) {
-    console.error("[NFSE] Erro ao criar pasta:", dirPath, err);
-  }
-}
-
-function extractCnpjLike(str) {
-  if (!str) return null;
-  const match = str.match(/(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/);
-  if (!match) return null;
-  return match[1].replace(/\D/g, "");
-}
-
-function buildPaths(pastaDestino, tipoNota) {
-  const baseDir = path.resolve(process.cwd(), pastaDestino || "downloads");
-  const subDir = tipoNota === "recebidas" ? "Entrada" : "Saida";
-  const finalDir = path.join(baseDir, subDir);
-  return { baseDir, subDir, finalDir };
-}
-
-// ---------------------------------------------------------------------
-// MODO 1 – SIMULAÇÃO
-// ---------------------------------------------------------------------
-async function runManualDownloadSimulado(params = {}) {
-  const { onLog } = params || {};
-  const { logs, pushLog } = createLogger(onLog);
-
-  const {
-    dataInicial,
-    dataFinal,
-    tipoNota,
-    baixarXml,
-    baixarPdf,
-    pastaDestino,
-    empresaId,
-    empresaNome,
-    modoExecucao,
-  } = params;
-
-  const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
-
-  const paths = buildPaths(pastaDestino, tipoNota);
-  ensureDir(paths.finalDir);
-
-  pushLog(
-    `[BOT] (Debug) Modo SIMULAÇÃO ativo. NFSE_USE_PORTAL = "${
-      process.env.NFSE_USE_PORTAL || "não definido"
-    }".`
-  );
-
-  pushLog("[BOT] Iniciando robô de download manual de NFS-e (SIMULAÇÃO)...");
-  pushLog(`[BOT] Período selecionado: ${periodoLabel}`);
-  pushLog(
-    `[BOT] Tipo de nota: ${
-      tipoNota === "recebidas"
-        ? "Notas Recebidas (Entrada)"
-        : "Notas Emitidas (Saída)"
-    }`
-  );
-
-  const formatos = [baixarXml ? "XML" : null, baixarPdf ? "PDF" : null].filter(
-    Boolean
-  );
-  pushLog(`[BOT] Formatos: ${formatos.join(" + ") || "Nenhum"}`);
-  pushLog(`[BOT] Pasta de destino: ${pastaDestino || "downloads"}`);
-
-  pushLog(
-    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
-  );
-
-  pushLog("[BOT] (Simulação) Abrindo navegador automatizado...");
-  pushLog("[BOT] (Simulação) Acessando portal da NFS-e...");
-  pushLog("[BOT] (Simulação) Aplicando filtros de data e tipo de nota...");
-  if (baixarXml) pushLog("[BOT] (Simulação) Baixando arquivos XML...");
-  if (baixarPdf) pushLog("[BOT] (Simulação) Baixando arquivos PDF...");
-  pushLog("[BOT] (Simulação) Organizando arquivos nas pastas Entrada/Saída...");
-  pushLog("[BOT] Download manual concluído com sucesso (simulação).");
-
-  try {
-    registrarExecucao({
-      empresaId: empresaId || null,
-      empresaNome: empresaNome || null,
-      tipo: modoExecucao || "manual",
-      totalArquivos: 0,
-      status: "simulado",
-      detalhes: `Simulação - tipoNota=${tipoNota}, período=${periodoLabel}.`,
-    });
-  } catch (err) {
-    console.error("[BOT] Erro ao registrar histórico (simulação):", err);
-  }
-
-  return { logs, paths };
-}
-
-// ---------------------------------------------------------------------
 // Helper: clicar e capturar arquivo usando evento de download do Playwright
-// ✅ mais estável com download.saveAs() (evita download.path(): canceled)
+// ✅ AJUSTE DE PASTAS: só cria a pasta de destino quando realmente vai salvar
 // ---------------------------------------------------------------------
 async function clickAndCaptureFile({
   page,
@@ -436,9 +480,7 @@ async function clickAndCaptureFile({
         if (el instanceof HTMLElement) {
           el.click();
         } else {
-          el.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, cancelable: true })
-          );
+          el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
         }
       }),
     ]);
@@ -454,35 +496,48 @@ async function clickAndCaptureFile({
 
     const failure = await download.failure().catch(() => null);
     if (failure) {
-      throw new Error(
-        `Falha no download (${extPreferida || "arquivo"}): ${failure}`
-      );
+      throw new Error(`Falha no download (${extPreferida || "arquivo"}): ${failure}`);
     }
 
     let originalName = download.suggestedFilename() || "arquivo";
     originalName = originalName.replace(/[/\\]/g, "_");
 
-    let ext = path.extname(originalName);
+    let ext = path.extname(originalName).toLowerCase();
+    const expectedExt =
+      extPreferida === "pdf" ? ".pdf" : extPreferida === "xml" ? ".xml" : null;
+
+    // ✅ Ajuste: se foi pedido XML, mas veio PDF (ou vice-versa), NÃO salva (evita misturar)
+    if (expectedExt && ext && ext !== expectedExt) {
+      pushLog(
+        `[BOT] Aviso: download inesperado na linha ${linhaIndex}. Esperado "${expectedExt}", mas veio "${ext}" (arquivo: "${originalName}"). Ignorando para não misturar.`
+      );
+      return false;
+    }
+
+    // Se não vier extensão, tenta assumir pela preferida
     if (!ext) {
-      ext =
-        extPreferida === "pdf"
-          ? ".pdf"
-          : extPreferida === "xml"
-          ? ".xml"
-          : ".bin";
+      ext = expectedExt || ".bin";
       originalName += ext;
     }
 
-    const cnpj =
-      extractCnpjLike(originalName) || extractCnpjLike(download.url()) || null;
+    const cnpj = extractCnpjLike(originalName) || extractCnpjLike(download.url()) || null;
 
     arquivoIndexRef.value += 1;
     const index = arquivoIndexRef.value;
 
-    const tipoSlug = tipoNota === "recebidas" ? "recebidas" : "emitidas";
+    const tipoSlug =
+      tipoNota === "recebidas"
+        ? "recebidas"
+        : tipoNota === "canceladas"
+        ? "canceladas"
+        : "emitidas";
+
     const cnpjParte = cnpj || `linha${linhaIndex}`;
     const newName = `${tipoSlug}-${cnpjParte}-${index}${ext}`;
     const savePath = path.join(finalDir, newName);
+
+    // ✅ cria só aqui, quando realmente vai salvar algo
+    ensureDir(finalDir);
 
     await download.saveAs(savePath);
 
@@ -492,15 +547,253 @@ async function clickAndCaptureFile({
 
     return true;
   } catch (e) {
-    pushLog(
-      `[BOT] Erro ao clicar/capturar arquivo na linha ${linhaIndex}: ${e.message}`
-    );
+    pushLog(`[BOT] Erro ao clicar/capturar arquivo na linha ${linhaIndex}: ${e.message}`);
     return false;
   }
 }
 
 // ---------------------------------------------------------------------
-// MODO 2 – PORTAL NACIONAL (Playwright)
+// ✅ Navegação por tipo
+// - Emitidas: /Notas/Emitidas
+// - Recebidas: /Notas/Recebidas
+// - Canceladas: ficam na lista de Emitidas (Situação=cancelada)
+// ---------------------------------------------------------------------
+async function navigateToTipo(page, tipoNota, pushLog) {
+  const emitidasUrl =
+    process.env.NFSE_EMITIDAS_URL || "https://www.nfse.gov.br/EmissorNacional/Notas/Emitidas";
+
+  const recebidasUrl =
+    process.env.NFSE_RECEBIDAS_URL || "https://www.nfse.gov.br/EmissorNacional/Notas/Recebidas";
+
+  if (tipoNota === "recebidas") {
+    try {
+      pushLog('[BOT] Tentando clicar no ícone "NFS-e Recebidas"...');
+      await page.click('[title="NFS-e Recebidas"]', { timeout: 8000 });
+      await page.waitForURL("**/Notas/Recebidas", { timeout: 15000 }).catch(() => {});
+      pushLog("[BOT] Tela de Recebidas aberta.");
+      return;
+    } catch {
+      pushLog("[BOT] Falha ao clicar Recebidas. Tentando URL direta...");
+      await page.goto(recebidasUrl, { waitUntil: "networkidle", timeout: 20000 });
+      pushLog(`[BOT] URL atual: ${page.url()}`);
+      return;
+    }
+  }
+
+  if (tipoNota === "canceladas") {
+    pushLog(
+      '[BOT] Tipo "canceladas": portal costuma listar canceladas dentro de "Emitidas" (coluna Situação). Abrindo Emitidas...'
+    );
+    await page
+      .goto(emitidasUrl, { waitUntil: "networkidle", timeout: 20000 })
+      .catch(async () => {
+        try {
+          await page.click('[title="NFS-e Emitidas"]', { timeout: 8000 });
+        } catch {}
+      });
+    pushLog(`[BOT] URL atual (canceladas via emitidas): ${page.url()}`);
+    return;
+  }
+
+  // emitidas (default)
+  try {
+    pushLog('[BOT] Tentando clicar no ícone "NFS-e Emitidas"...');
+    await page.click('[title="NFS-e Emitidas"]', { timeout: 8000 });
+    await page.waitForURL("**/Notas/Emitidas", { timeout: 15000 }).catch(() => {});
+    pushLog("[BOT] Tela de Emitidas aberta.");
+    return;
+  } catch {
+    pushLog("[BOT] Falha ao clicar Emitidas. Tentando URL direta...");
+    await page.goto(emitidasUrl, { waitUntil: "networkidle", timeout: 20000 });
+    pushLog(`[BOT] URL atual: ${page.url()}`);
+    return;
+  }
+}
+
+// ---------------------------------------------------------------------
+// ✅ Filtro de datas (portal -> fallback antigo -> fallback tabela)
+// ---------------------------------------------------------------------
+async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
+  let usarFiltroNaTabela = false;
+
+  if (dataInicial || dataFinal) {
+    // 1) filtro real do portal (labels + Filtrar)
+    try {
+      const diBr = formatDateBrFromISO(dataInicial);
+      const dfBr = formatDateBrFromISO(dataFinal);
+
+      const inputDataInicial = page.locator(
+        `xpath=//label[contains(normalize-space(.),"Data Inicial")]/following::input[1]`
+      );
+      const inputDataFinal = page.locator(
+        `xpath=//label[contains(normalize-space(.),"Data Final")]/following::input[1]`
+      );
+
+      const hasIni = (await inputDataInicial.count().catch(() => 0)) > 0;
+      const hasFim = (await inputDataFinal.count().catch(() => 0)) > 0;
+
+      pushLog(
+        `[BOT] Campos de data detectados? Data Inicial=${hasIni ? "sim" : "não"} | Data Final=${
+          hasFim ? "sim" : "não"
+        }`
+      );
+
+      if ((hasIni && diBr) || (hasFim && dfBr)) {
+        if (hasIni && diBr) {
+          await inputDataInicial.first().click({ delay: 50 });
+          await page.keyboard.press("Control+A");
+          await page.keyboard.type(diBr, { delay: 25 });
+        }
+
+        if (hasFim && dfBr) {
+          await inputDataFinal.first().click({ delay: 50 });
+          await page.keyboard.press("Control+A");
+          await page.keyboard.type(dfBr, { delay: 25 });
+        }
+
+        const btnFiltrar = page.getByRole("button", { name: /filtrar/i });
+
+        await Promise.all([
+          page.waitForLoadState("networkidle").catch(() => {}),
+          btnFiltrar.click({ delay: 50 }).catch(() => {}),
+        ]);
+
+        await page.waitForTimeout(800);
+
+        pushLog(
+          `[BOT] Filtro de período aplicado no portal (Data Inicial/Data Final): ${buildPeriodoLabel(
+            dataInicial,
+            dataFinal
+          )}.`
+        );
+
+        return { usarFiltroNaTabela: false };
+      }
+    } catch (err) {
+      pushLog(
+        `[BOT] Não consegui aplicar filtro do portal (labels/Filtrar): ${err.message}. Vou tentar inputs alternativos e/ou filtrar pela coluna "Emissão".`
+      );
+    }
+
+    // 2) fallback antigo (ids/names)
+    try {
+      const diBr = formatDateBrFromISO(dataInicial);
+      const dfBr = formatDateBrFromISO(dataFinal);
+
+      await page.waitForTimeout(500);
+
+      const dataInicialInput =
+        (await page.$(
+          'input[id*="DataInicio"], input[name*="DataInicio"], input[id*="DataEmissaoInicial"], input[name*="DataEmissaoInicial"]'
+        )) ||
+        (await page.$('input[id*="DataCompetenciaInicio"], input[name*="DataCompetenciaInicio"]'));
+
+      const dataFinalInput =
+        (await page.$(
+          'input[id*="DataFim"], input[name*="DataFim"], input[id*="DataEmissaoFinal"], input[name*="DataEmissaoFinal"]'
+        )) || (await page.$('input[id*="DataCompetenciaFim"], input[name*="DataCompetenciaFim"]'));
+
+      if ((dataInicialInput && diBr) || (dataFinalInput && dfBr)) {
+        if (dataInicialInput && diBr) await dataInicialInput.fill(diBr);
+        if (dataFinalInput && dfBr) await dataFinalInput.fill(dfBr);
+
+        const botaoPesquisar =
+          (await page.$(
+            'button[type="submit"]:has-text("Pesquisar"), button:has-text("Consultar"), button:has-text("Buscar")'
+          )) ||
+          (await page.$(
+            'input[type="submit"][value*="Pesquisar"], input[type="submit"][value*="Consultar"], input[type="submit"][value*="Buscar"]'
+          ));
+
+        if (botaoPesquisar) {
+          await botaoPesquisar.click();
+          await page.waitForTimeout(1500);
+          pushLog(
+            `[BOT] Filtro de período aplicado pelos campos (fallback antigo): ${buildPeriodoLabel(
+              dataInicial,
+              dataFinal
+            )}.`
+          );
+          return { usarFiltroNaTabela: false };
+        }
+
+        usarFiltroNaTabela = true;
+      } else {
+        usarFiltroNaTabela = true;
+      }
+    } catch (err2) {
+      usarFiltroNaTabela = true;
+      pushLog(
+        `[BOT] Erro ao aplicar filtro por campos (fallback antigo): ${err2.message}. Vou filtrar pela coluna "Emissão".`
+      );
+    }
+  }
+
+  if (usarFiltroNaTabela && (dataInicial || dataFinal)) {
+    pushLog("[BOT] Não localizei campos de data. Vou filtrar pela coluna 'Emissão' da tabela.");
+  }
+
+  return { usarFiltroNaTabela };
+}
+
+// ---------------------------------------------------------------------
+// MODO SIMULAÇÃO (mantido) – ✅ AJUSTE: não cria pastas de tipo automaticamente
+// ---------------------------------------------------------------------
+async function runManualDownloadSimulado(params = {}) {
+  const { onLog } = params || {};
+  const { logs, pushLog } = createLogger(onLog);
+
+  const {
+    dataInicial,
+    dataFinal,
+    tipoNota,
+    baixarXml,
+    baixarPdf,
+    pastaDestino,
+    empresaId,
+    empresaNome,
+    modoExecucao,
+    jobDir,
+  } = params;
+
+  const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
+
+  const jobPaths = buildJobPaths(pastaDestino, dataInicial, dataFinal);
+
+  const rootJobDir = jobDir ? path.resolve(process.cwd(), jobDir) : jobPaths.jobDir;
+  ensureDir(rootJobDir);
+
+  const finalDir = getTipoDirFromRoot(rootJobDir, tipoNota);
+
+  pushLog(
+    `[BOT] (Debug) Modo SIMULAÇÃO ativo. NFSE_USE_PORTAL = "${
+      process.env.NFSE_USE_PORTAL || "não definido"
+    }".`
+  );
+  pushLog("[BOT] Iniciando robô (SIMULAÇÃO)...");
+  pushLog(`[BOT] Tipo de nota: ${tipoNota}`);
+  pushLog(`[BOT] Período: ${periodoLabel}`);
+  pushLog(`[BOT] Pasta final: ${finalDir}`);
+
+  try {
+    registrarExecucao({
+      empresaId: empresaId || null,
+      empresaNome: empresaNome || null,
+      tipo: modoExecucao || "manual",
+      totalArquivos: 0,
+      status: "simulado",
+      detalhes: `Simulação - tipoNota=${tipoNota}, período=${periodoLabel}.`,
+    });
+  } catch (err) {
+    console.error("[BOT] Erro ao registrar histórico (simulação):", err);
+  }
+
+  return { logs, paths: { jobDir: rootJobDir, finalDir } };
+}
+
+// ---------------------------------------------------------------------
+// MODO PORTAL (Playwright)
+// ✅ AJUSTE: só cria a pasta (Emitidas/Recebidas/Canceladas) se houver download real
 // ---------------------------------------------------------------------
 async function runManualDownloadPortal(params = {}) {
   const { onLog } = params || {};
@@ -518,6 +811,7 @@ async function runManualDownloadPortal(params = {}) {
     empresaId,
     empresaNome,
     modoExecucao,
+    jobDir,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
@@ -526,251 +820,118 @@ async function runManualDownloadPortal(params = {}) {
   const senha = senhaParam || process.env.NFSE_PASSWORD;
 
   if (!login || !senha) {
-    pushLog(
-      "[BOT] Login/senha não informados para esta execução. Voltando para modo SIMULAÇÃO."
-    );
-    const simResult = await runManualDownloadSimulado({
-      ...params,
-      modoExecucao,
-      onLog,
-    });
+    pushLog("[BOT] Login/senha não informados. Voltando para SIMULAÇÃO.");
+    const simResult = await runManualDownloadSimulado({ ...params, modoExecucao, onLog });
     return { logs: logs.concat(simResult.logs), paths: simResult.paths };
   }
 
-  const paths = buildPaths(pastaDestino, tipoNota);
-  ensureDir(paths.finalDir);
+  const jobPaths = buildJobPaths(pastaDestino, dataInicial, dataFinal);
 
-  pushLog(
-    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
-  );
+  const rootJobDir = jobDir ? path.resolve(process.cwd(), jobDir) : jobPaths.jobDir;
+  ensureDir(rootJobDir);
+
+  // ✅ NÃO cria as 3 pastas aqui.
+  // Só define qual seria a pasta final (e cria quando realmente salvar algum arquivo).
+  const finalDir = getTipoDirFromRoot(rootJobDir, tipoNota);
+
+  pushLog(`[BOT] JobDir: ${rootJobDir}`);
+  pushLog(`[BOT] Tipo: ${tipoNota} | Pasta final: ${finalDir}`);
 
   const browser = await launchNFSEBrowser();
-
-  const context = await browser.newContext({
-    acceptDownloads: true,
-  });
+  const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
 
   const arquivoIndexRef = { value: 0 };
   let teveErro = false;
 
   try {
-    // 1) Abrir tela de login
+    // 1) Abrir login
     pushLog("[BOT] Abrindo portal nacional da NFS-e...");
     await page.goto(NFSE_PORTAL_URL, { waitUntil: "domcontentloaded" });
     pushLog("[BOT] Página de login carregada.");
 
-    // 2) Preencher login
-    try {
-      await page.fill(
-        'input[name="Login"], input[id="Login"], input[type="text"]',
-        login
-      );
-      pushLog("[BOT] Login preenchido.");
-    } catch (err) {
-      pushLog(
-        "[BOT] Não consegui encontrar o campo de login. Ajuste os seletores em src/bot/nfseBot.js (parte do login)."
-      );
-      throw err;
-    }
+    // 2) Login
+    await page.fill('input[name="Login"], input[id="Login"], input[type="text"]', login);
+    pushLog("[BOT] Login preenchido.");
 
-    // 3) Preencher senha
-    try {
-      await page.fill(
-        'input[name="Senha"], input[id="Senha"], input[type="password"]',
-        senha
-      );
-      pushLog("[BOT] Senha preenchida.");
-    } catch (err) {
-      pushLog(
-        "[BOT] Não consegui encontrar o campo de senha. Ajuste os seletores em src/bot/nfseBot.js (parte da senha)."
-      );
-      throw err;
-    }
+    await page.fill('input[name="Senha"], input[id="Senha"], input[type="password"]', senha);
+    pushLog("[BOT] Senha preenchida.");
 
-    // 4) Clicar no botão de entrar
-    try {
-      await page.click(
-        'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")'
-      );
-      pushLog("[BOT] Botão de login clicado. Aguardando resposta...");
-    } catch (err) {
-      pushLog(
-        "[BOT] Não consegui encontrar o botão de login. Ajuste os seletores em src/bot/nfseBot.js (parte do botão)."
-      );
-      throw err;
-    }
+    await page.click(
+      'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")'
+    );
+    pushLog("[BOT] Botão de login clicado. Aguardando...");
 
-    // 5) Esperar a navegação / mudança de tela
-    try {
-      await Promise.race([
-        page.waitForNavigation({ waitUntil: "networkidle", timeout: 15000 }),
-        page.waitForTimeout(15000),
-      ]);
-    } catch {}
+    await Promise.race([
+      page.waitForNavigation({ waitUntil: "networkidle", timeout: 15000 }),
+      page.waitForTimeout(15000),
+    ]).catch(() => {});
 
-    const urlAposLogin = page.url();
-    const titulo = await page.title().catch(() => "(sem título)");
-
-    console.log("[NFSE] URL após login:", urlAposLogin);
-    console.log("[NFSE] Título após login:", titulo);
-
-    if (urlAposLogin.includes("/Login")) {
-      pushLog(
-        "[BOT] (Alerta) Ainda estou na tela de Login. O login pode ter falhado ou exigir alguma ação extra (captcha, seleção, etc.)."
-      );
+    if (page.url().includes("/Login")) {
+      pushLog("[BOT] (Alerta) Ainda na tela de login. Pode ter captcha/seleção extra.");
     } else {
-      pushLog(
-        "[BOT] Login aparentemente BEM-SUCEDIDO (URL diferente da tela de Login)."
-      );
+      pushLog("[BOT] Login OK (URL mudou).");
     }
 
-    pushLog(
-      "[BOT] (MVP) Login tentado. Verifique visualmente se entrou no sistema."
+    // 3) Navega para o tipo
+    await navigateToTipo(page, tipoNota, pushLog);
+
+    // 4) Filtro de data
+    const { usarFiltroNaTabela } = await applyDateFilterIfExists(
+      page,
+      dataInicial,
+      dataFinal,
+      pushLog
     );
 
-    // 6) Ir para "Notas Emitidas" ou "Notas Recebidas"
-    const emitidasUrl =
-      process.env.NFSE_EMITIDAS_URL ||
-      "https://www.nfse.gov.br/EmissorNacional/Notas/Emitidas";
+    // ✅ Situação/Status:
+    // - canceladas: usado para INCLUIR somente canceladas
+    // - emitidas: usado para EXCLUIR canceladas do meio
+    let situacaoIdx = -1;
 
-    const recebidasUrl =
-      process.env.NFSE_RECEBIDAS_URL ||
-      "https://www.nfse.gov.br/EmissorNacional/Notas/Recebidas";
-
-    const targetUrl = tipoNota === "recebidas" ? recebidasUrl : emitidasUrl;
-
-    try {
-      if (tipoNota === "recebidas") {
+    if (tipoNota === "canceladas") {
+      situacaoIdx = await findSituacaoColumnIndex(page);
+      if (situacaoIdx < 0) {
         pushLog(
-          '[BOT] Tentando clicar no ícone "NFS-e Recebidas" na barra superior...'
+          '[BOT] ⚠️ Não encontrei coluna "Situação/Status". Para evitar erro, canceladas ficará vazio nesta execução.'
         );
-        await page.click('[title="NFS-e Recebidas"]', { timeout: 8000 });
-        try {
-          await page.waitForURL("**/Notas/Recebidas", { timeout: 15000 });
-        } catch {}
-        pushLog("[BOT] Clique em NFS-e Recebidas concluído.");
+      } else {
+        pushLog(`[BOT] Coluna Situação/Status detectada (idx=${situacaoIdx}).`);
+      }
+    }
+
+    // ✅ NOVO (sem quebrar nada): em "emitidas", pula linhas canceladas
+    let situacaoIdxEmitidas = -1;
+    if (tipoNota === "emitidas") {
+      situacaoIdxEmitidas = await findSituacaoColumnIndex(page);
+      if (situacaoIdxEmitidas >= 0) {
+        pushLog(
+          `[BOT] Coluna Situação/Status detectada para filtro de emitidas (idx=${situacaoIdxEmitidas}). Canceladas serão ignoradas em Emitidas.`
+        );
       } else {
         pushLog(
-          '[BOT] Tentando clicar no ícone "NFS-e Emitidas" na barra superior...'
-        );
-        await page.click('[title="NFS-e Emitidas"]', { timeout: 8000 });
-        try {
-          await page.waitForURL("**/Notas/Emitidas", { timeout: 15000 });
-        } catch {}
-        pushLog("[BOT] Clique em NFS-e Emitidas concluído.");
-      }
-
-      const urlDepoisClique = page.url();
-      pushLog(
-        `[BOT] URL após clique no menu de notas: ${urlDepoisClique} (pode continuar /EmissorNacional em alguns casos).`
-      );
-    } catch (errClick) {
-      pushLog(
-        "[BOT] Não consegui clicar no ícone do menu de notas. Tentando acessar pela URL direta..."
-      );
-      try {
-        await page.goto(targetUrl, { waitUntil: "networkidle", timeout: 20000 });
-        const urlNotas = page.url();
-        pushLog(
-          `[BOT] Tela de notas aparentemente aberta pela URL direta. URL atual: ${urlNotas}`
-        );
-      } catch (errUrl) {
-        pushLog(
-          "[BOT] Não consegui abrir a tela de notas nem pelo clique nem pela URL direta. Verifique as configurações."
-        );
-        throw errUrl;
-      }
-    }
-
-    // -----------------------------------------------------------------
-    // Tentar aplicar filtro de PERÍODO via campos
-    // -----------------------------------------------------------------
-    let usarFiltroNaTabela = false;
-
-    if (dataInicial || dataFinal) {
-      try {
-        const diBr = formatDateBrFromISO(dataInicial);
-        const dfBr = formatDateBrFromISO(dataFinal);
-
-        await page.waitForTimeout(500);
-
-        const dataInicialInput =
-          (await page.$(
-            'input[id*="DataInicio"], input[name*="DataInicio"], input[id*="DataEmissaoInicial"], input[name*="DataEmissaoInicial"]'
-          )) ||
-          (await page.$(
-            'input[id*="DataCompetenciaInicio"], input[name*="DataCompetenciaInicio"]'
-          ));
-
-        const dataFinalInput =
-          (await page.$(
-            'input[id*="DataFim"], input[name*="DataFim"], input[id*="DataEmissaoFinal"], input[name*="DataEmissaoFinal"]'
-          )) ||
-          (await page.$(
-            'input[id*="DataCompetenciaFim"], input[name*="DataCompetenciaFim"]'
-          ));
-
-        if ((dataInicialInput && diBr) || (dataFinalInput && dfBr)) {
-          if (dataInicialInput && diBr) await dataInicialInput.fill(diBr);
-          if (dataFinalInput && dfBr) await dataFinalInput.fill(dfBr);
-
-          const botaoPesquisar =
-            (await page.$(
-              'button[type="submit"]:has-text("Pesquisar"), button:has-text("Consultar"), button:has-text("Buscar")'
-            )) ||
-            (await page.$(
-              'input[type="submit"][value*="Pesquisar"], input[type="submit"][value*="Consultar"], input[type="submit"][value*="Buscar"]'
-            ));
-
-          if (botaoPesquisar) {
-            await botaoPesquisar.click();
-            await page.waitForTimeout(1500);
-            pushLog(
-              `[BOT] Filtro de período aplicado pelos campos: ${buildPeriodoLabel(
-                dataInicial,
-                dataFinal
-              )}.`
-            );
-          } else {
-            usarFiltroNaTabela = true;
-          }
-        } else {
-          usarFiltroNaTabela = true;
-        }
-      } catch (err) {
-        usarFiltroNaTabela = true;
-        pushLog(
-          `[BOT] Erro ao tentar aplicar filtro de data pelos campos: ${err.message}. Vou filtrar pela coluna "Emissão".`
+          `[BOT] (Info) Não encontrei coluna Situação/Status para filtro de emitidas. Seguindo sem filtrar canceladas em Emitidas.`
         );
       }
     }
 
-    if (usarFiltroNaTabela && (dataInicial || dataFinal)) {
-      pushLog(
-        "[BOT] Não localizei campos de data no formulário. Vou aplicar o filtro diretamente pela coluna 'Emissão' da tabela."
-      );
-    }
-
-    // 7) Ver se há tabela ou mensagem “Nenhum registro encontrado”
+    // 5) Validar “nenhum registro”
     const textoPagina = (await page.textContent("body").catch(() => "")) || "";
-
     if (textoPagina.includes("Nenhum registro encontrado")) {
-      pushLog(
-        "[BOT] Nenhuma nota encontrada (a tela exibiu 'Nenhum registro encontrado')."
-      );
+      pushLog("[BOT] Nenhuma nota encontrada (Nenhum registro encontrado).");
+      pushLog(`[BOT] Página atual validada: ${page.url()}`);
     } else {
       await page.waitForSelector("table tbody tr", { timeout: 10000 });
       const rowHandles = await page.$$("table tbody tr");
       const rowCount = rowHandles.length;
 
-      pushLog(`[BOT] Tabela de notas carregada. Linhas encontradas: ${rowCount}.`);
+      pushLog(`[BOT] Tabela carregada. Linhas: ${rowCount}.`);
 
       const dataInicialDate = dataInicial ? parseIsoToDate(dataInicial) : null;
       const dataFinalDate = dataFinal ? parseIsoToDate(dataFinal) : null;
 
       if (rowCount === 0) {
-        pushLog("[BOT] Aviso: nenhuma nota encontrada na tabela para o período informado.");
+        pushLog("[BOT] Nenhuma nota na tabela para o período.");
       } else {
         if (!baixarXml && !baixarPdf) {
           pushLog("[BOT] Nenhum formato selecionado (XML/PDF). Nada será baixado.");
@@ -782,20 +943,14 @@ async function runManualDownloadPortal(params = {}) {
 
             try {
               const allCells = await row.$$("td");
-              const acaoCell =
-                allCells.length > 0 ? allCells[allCells.length - 1] : null;
 
-              // -----------------------------------------------------------------
-              // Filtro pela coluna "Emissão" (primeira coluna), se datas foram informadas
-              // -----------------------------------------------------------------
-              if (dataInicialDate || dataFinalDate) {
+              // fallback por coluna Emissão
+              if (usarFiltroNaTabela && (dataInicialDate || dataFinalDate)) {
                 const emissaoCell = allCells[0] || null;
                 let emissaoTexto = "";
 
                 if (emissaoCell) {
-                  emissaoTexto =
-                    (await emissaoCell.innerText().catch(() => "")) || "";
-                  emissaoTexto = emissaoTexto.trim();
+                  emissaoTexto = ((await emissaoCell.innerText().catch(() => "")) || "").trim();
                 }
 
                 const emissaoDate = parseBrDateToDate(emissaoTexto);
@@ -806,40 +961,53 @@ async function runManualDownloadPortal(params = {}) {
                     (dataFinalDate && emissaoDate > dataFinalDate)
                   ) {
                     pushLog(
-                      `[BOT] Linha ${linhaIndex}: data de emissão ${emissaoTexto} fora do período selecionado. Ignorando linha.`
+                      `[BOT] Linha ${linhaIndex}: emissão ${emissaoTexto} fora do período. Ignorando.`
                     );
                     continue;
                   }
                 }
               }
 
-              if (!acaoCell) {
+              // ✅ CANCELADAS: filtra pela coluna Situação/Status (ícone/tooltip)
+              if (tipoNota === "canceladas") {
+                if (situacaoIdx < 0) continue;
+
+                const r = await isRowCanceladaBySituacaoIdx(row, situacaoIdx);
+
                 pushLog(
-                  `[BOT] Linha ${linhaIndex}: não encontrei coluna de ações (última coluna).`
+                  `[BOT] Linha ${linhaIndex}: Situação="${r.statusNorm || "?"}" (raw="${
+                    r.statusRaw || ""
+                  }")`
                 );
+
+                if (!r.isCancelled) continue;
+
+                pushLog(`[BOT] Linha ${linhaIndex}: nota CANCELADA detectada. Processando...`);
+              }
+
+              // ✅ EMITIDAS: ignorar canceladas no meio
+              if (tipoNota === "emitidas" && situacaoIdxEmitidas >= 0) {
+                const rEmi = await isRowCanceladaBySituacaoIdx(row, situacaoIdxEmitidas);
+                if (rEmi.isCancelled) {
+                  pushLog(
+                    `[BOT] Linha ${linhaIndex}: (Emitidas) nota CANCELADA detectada na lista. Ignorando para não misturar.`
+                  );
+                  continue;
+                }
+              }
+
+              const acaoCell = allCells.length > 0 ? allCells[allCells.length - 1] : null;
+
+              if (!acaoCell) {
+                pushLog(`[BOT] Linha ${linhaIndex}: não encontrei coluna de ações.`);
                 continue;
               }
 
-              const menuWrapper =
-                (await acaoCell.$(".menu-suspenso-tabela")) || acaoCell;
-
-              if (linhaIndex === 1) {
-                try {
-                  const htmlRaw = await menuWrapper.innerHTML();
-                  const htmlShort = htmlRaw
-                    .replace(/\s+/g, " ")
-                    .trim()
-                    .slice(0, 350);
-                  pushLog(
-                    `[BOT] (Debug) HTML do menu suspenso (linha 1, recortado): ${htmlShort}...`
-                  );
-                } catch {}
-              }
-
+              const menuWrapper = (await acaoCell.$(".menu-suspenso-tabela")) || acaoCell;
               const trigger = await menuWrapper.$(".icone-trigger");
               if (!trigger) {
                 pushLog(
-                  `[BOT] Linha ${linhaIndex}: não encontrei o ícone do menu suspenso (.icone-trigger).`
+                  `[BOT] Linha ${linhaIndex}: não encontrei o ícone do menu (.icone-trigger).`
                 );
                 continue;
               }
@@ -848,16 +1016,13 @@ async function runManualDownloadPortal(params = {}) {
               await page.waitForTimeout(200);
 
               const menu =
-                (await menuWrapper.$(".menu-content")) ||
-                (await menuWrapper.$(".list-group"));
+                (await menuWrapper.$(".menu-content")) || (await menuWrapper.$(".list-group"));
               if (!menu) {
-                pushLog(
-                  `[BOT] Linha ${linhaIndex}: menu suspenso (.menu-content/.list-group) não encontrado após clique.`
-                );
+                pushLog(`[BOT] Linha ${linhaIndex}: menu suspenso não encontrado após clique.`);
                 continue;
               }
 
-              // -------- XML --------
+              // XML
               if (baixarXml) {
                 let xmlLink =
                   (await menu.$('a:has-text("Download XML")')) ||
@@ -866,13 +1031,11 @@ async function runManualDownloadPortal(params = {}) {
                   (await menu.$('a[href*="xml"]'));
 
                 if (xmlLink) {
-                  pushLog(
-                    `[BOT] Linha ${linhaIndex}: clicando na opção "Download XML"...`
-                  );
+                  pushLog(`[BOT] Linha ${linhaIndex}: baixando XML...`);
                   await clickAndCaptureFile({
                     page,
                     element: xmlLink,
-                    finalDir: paths.finalDir,
+                    finalDir,
                     tipoNota,
                     pushLog,
                     extPreferida: "xml",
@@ -880,13 +1043,11 @@ async function runManualDownloadPortal(params = {}) {
                     linhaIndex,
                   });
                 } else {
-                  pushLog(
-                    `[BOT] Linha ${linhaIndex}: não encontrei item de menu para XML.`
-                  );
+                  pushLog(`[BOT] Linha ${linhaIndex}: XML não encontrado no menu.`);
                 }
               }
 
-              // -------- PDF / DANFS --------
+              // PDF
               if (baixarPdf) {
                 let pdfLink =
                   (await menu.$('a:has-text("Download DANFS-e")')) ||
@@ -898,16 +1059,17 @@ async function runManualDownloadPortal(params = {}) {
                   (await menu.$('a[href*="pdf"]'));
 
                 if (pdfLink) {
-                  pushLog(
-                    `[BOT] Linha ${linhaIndex}: clicando na opção "Download DANFS-e"/PDF...`
-                  );
+                  pushLog(`[BOT] Linha ${linhaIndex}: baixando PDF...`);
 
-                  // ✅ nome final do PDF (mesmo padrão emitidas/recebidas + linha + índice)
-                  const tipoSlug = tipoNota === "recebidas" ? "recebidas" : "emitidas";
-                  const destinoPdfPreview = `${tipoSlug}-linha${linhaIndex}-${
-                    arquivoIndexRef.value + 1
-                  }.pdf`;
-                  const destinoPdf = path.join(paths.finalDir, destinoPdfPreview);
+                  const tipoSlug =
+                    tipoNota === "recebidas"
+                      ? "recebidas"
+                      : tipoNota === "canceladas"
+                      ? "canceladas"
+                      : "emitidas";
+
+                  const destinoPdfPreview = `${tipoSlug}-linha${linhaIndex}-${arquivoIndexRef.value + 1}.pdf`;
+                  const destinoPdf = path.join(finalDir, destinoPdfPreview);
 
                   try {
                     const ok = await baixarPdfRobusto({
@@ -917,53 +1079,39 @@ async function runManualDownloadPortal(params = {}) {
                       log: (m) => pushLog(m),
                       pdfLinkHandle: pdfLink,
                       clickPdfOption: async () => {
-                        // clique robusto (evita not visible + dispara corretamente)
                         await safeClickHandle(pdfLink);
                       },
                     });
 
                     if (ok) {
-                      // só conta o arquivo se realmente salvou
+                      // ✅ aqui a pasta também já foi criada pelo mkdirSync do baixarPdfRobusto
                       arquivoIndexRef.value += 1;
-                      pushLog(
-                        `[BOT] PDF registrado como arquivo #${arquivoIndexRef.value}.`
-                      );
+                      pushLog(`[BOT] PDF registrado como arquivo #${arquivoIndexRef.value}.`);
                     }
                   } catch (e) {
-                    pushLog(
-                      `[BOT] Erro ao clicar/capturar PDF na linha ${linhaIndex}: ${e.message}`
-                    );
+                    pushLog(`[BOT] Erro ao capturar PDF na linha ${linhaIndex}: ${e.message}`);
                   }
                 } else {
-                  pushLog(
-                    `[BOT] Linha ${linhaIndex}: não encontrei item de menu para PDF/DANFS-e.`
-                  );
+                  pushLog(`[BOT] Linha ${linhaIndex}: PDF/DANFS não encontrado no menu.`);
                 }
               }
 
               await page.waitForTimeout(150);
             } catch (linhaErr) {
-              pushLog(
-                `[BOT] Erro inesperado ao processar a linha ${linhaIndex}: ${linhaErr.message}`
-              );
+              pushLog(`[BOT] Erro ao processar linha ${linhaIndex}: ${linhaErr.message}`);
             }
           }
         }
       }
     }
 
-    pushLog(
-      `[BOT] Processo de download finalizado. Total de arquivos capturados nesta execução: ${arquivoIndexRef.value}.`
-    );
-    pushLog(
-      "[BOT] (MVP Portal) Login + navegação até tela de notas executados, com captura e organização automática dos arquivos."
-    );
+    pushLog(`[BOT] Finalizado (${tipoNota}). Total capturado: ${arquivoIndexRef.value}.`);
   } catch (err) {
-    console.error("Erro no robô Playwright (portal nacional):", err);
-    pushLog(`[BOT] ERRO durante a execução no portal nacional: ${err.message}`);
+    console.error("Erro no robô Playwright:", err);
+    pushLog(`[BOT] ERRO: ${err.message}`);
     teveErro = true;
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
     pushLog("[BOT] Navegador fechado.");
 
     try {
@@ -974,17 +1122,14 @@ async function runManualDownloadPortal(params = {}) {
         totalArquivos: arquivoIndexRef.value,
         status: teveErro ? "erro" : "sucesso",
         erros: teveErro ? [{ message: "Verificar logs desta execução" }] : null,
-        detalhes: `Execução ${
-          modoExecucao || "manual"
-        } no portal nacional - tipoNota=${tipoNota}, período=${periodoLabel}.`,
+        detalhes: `Portal nacional - tipoNota=${tipoNota}, período=${periodoLabel}.`,
       });
     } catch (histErr) {
-      console.error("[BOT] Erro ao registrar histórico (portal):", histErr);
+      console.error("[BOT] Erro ao registrar histórico:", histErr);
     }
   }
 
-  pushLog("[BOT] Fluxo MVP (portal nacional) finalizado.");
-  return { logs, paths };
+  return { logs, paths: { jobDir: rootJobDir, finalDir } };
 }
 
 // ---------------------------------------------------------------------
@@ -993,22 +1138,17 @@ async function runManualDownloadPortal(params = {}) {
 export async function runManualDownload(params = {}) {
   const usePortal = process.env.NFSE_USE_PORTAL === "true";
 
-  console.log(
-    "[NFSE] runManualDownload -> NFSE_USE_PORTAL =",
-    process.env.NFSE_USE_PORTAL,
-    "=> usePortal:",
-    usePortal
-  );
-
   if (usePortal) {
-    return runManualDownloadPortal({ ...params, modoExecucao: "manual" });
+    return runManualDownloadPortal({ ...params, modoExecucao: params.modoExecucao || "manual" });
   }
 
-  return runManualDownloadSimulado({ ...params, modoExecucao: "manual" });
+  return runManualDownloadSimulado({ ...params, modoExecucao: params.modoExecucao || "manual" });
 }
 
 // ---------------------------------------------------------------------
-// Execução em LOTE (REAL quando NFSE_USE_PORTAL=true)
+// Execução em LOTE
+// Agora aceita processarTipos: ["emitidas","recebidas","canceladas"]
+// ✅ AJUSTE: dentro de cada empresa, só cria pasta do(s) tipo(s) realmente executado(s) e que baixou arquivo
 // ---------------------------------------------------------------------
 export async function runLoteDownload(empresas = [], options = {}) {
   const {
@@ -1019,80 +1159,87 @@ export async function runLoteDownload(empresas = [], options = {}) {
     dataInicial,
     dataFinal,
     pastaDestino,
+    processarTipos,
   } = options || {};
 
   const { logs, pushLog } = createLogger(onLog);
   const usePortal = process.env.NFSE_USE_PORTAL === "true";
 
-  const paths = buildPaths(pastaDestino, tipoNota);
-  ensureDir(paths.finalDir);
+  // ✅ Ajuste: normaliza + remove duplicados
+  const tiposRaw =
+    Array.isArray(processarTipos) && processarTipos.length ? processarTipos : [tipoNota];
+  const tipos = [...new Set(tiposRaw.map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
 
-  pushLog(
-    `[BOT] Iniciando execução em lote (${
-      usePortal ? "MODO REAL (portal nacional)" : "SIMULAÇÃO"
-    })...`
-  );
-
-  pushLog(
-    `[BOT] Pasta base de downloads: ${paths.baseDir} | Subpasta: ${paths.subDir} | Final: ${paths.finalDir}`
-  );
+  pushLog(`[BOT] Iniciando execução em lote (${usePortal ? "REAL (portal)" : "SIMULAÇÃO"})...`);
+  pushLog(`[BOT] Tipos no lote: ${tipos.join(", ")}`);
+  pushLog(`[BOT] Período: ${buildPeriodoLabel(dataInicial, dataFinal)}`);
 
   if (!Array.isArray(empresas) || empresas.length === 0) {
     pushLog("[BOT] Nenhuma empresa cadastrada para executar em lote.");
-    return { logs, paths };
+    return { logs, paths: {} };
   }
+
+  const loteJobPaths = buildJobPaths(pastaDestino, dataInicial, dataFinal);
+  pushLog(`[BOT] Lote JobDir: ${loteJobPaths.jobDir}`);
 
   for (const emp of empresas) {
     pushLog("--------------------------------------------------------------");
-    pushLog(`[BOT] Processando empresa: ${emp.nome} (CNPJ: ${emp.cnpj})...`);
+    pushLog(`[BOT] Empresa: ${emp.nome} (CNPJ: ${emp.cnpj})`);
 
-    if (usePortal) {
-      const login = emp.loginPortal || emp.cnpj || null;
-      const senha = emp.senhaPortal || null;
+    const login = emp.loginPortal || emp.cnpj || null;
+    const senha = emp.senhaPortal || null;
 
-      if (!login || !senha) {
-        pushLog(
-          "[BOT] Login/senha da empresa não configurados. Pulando esta empresa no lote (sem simulação)."
-        );
-        continue;
+    if (usePortal && (!login || !senha)) {
+      pushLog("[BOT] Login/senha da empresa não configurados. Pulando.");
+      continue;
+    }
+
+    // ✅ Só cria a pasta da empresa (não cria Emitidas/Recebidas/Canceladas aqui)
+    const empresaDir = path.join(
+      loteJobPaths.jobDir,
+      `${String(emp.nome || "empresa").replace(/[^\w\-]+/g, "_")}_${String(
+        emp.cnpj || emp.id || ""
+      ).slice(-8)}`
+    );
+    ensureDir(empresaDir);
+
+    for (const t of tipos) {
+      if (usePortal) {
+        await runManualDownloadPortal({
+          dataInicial,
+          dataFinal,
+          tipoNota: t,
+          baixarXml,
+          baixarPdf,
+          pastaDestino,
+          login,
+          senha,
+          empresaId: emp.id || emp.cnpj,
+          empresaNome: emp.nome,
+          modoExecucao: "lote",
+          onLog: (msg) => pushLog(msg),
+          jobDir: empresaDir,
+        });
+      } else {
+        await runManualDownloadSimulado({
+          dataInicial,
+          dataFinal,
+          tipoNota: t,
+          baixarXml,
+          baixarPdf,
+          pastaDestino,
+          empresaId: emp.id || emp.cnpj,
+          empresaNome: emp.nome,
+          modoExecucao: "lote",
+          onLog: (msg) => pushLog(msg),
+          jobDir: empresaDir,
+        });
       }
-
-      await runManualDownloadPortal({
-        dataInicial,
-        dataFinal,
-        tipoNota,
-        baixarXml,
-        baixarPdf,
-        pastaDestino,
-        login,
-        senha,
-        empresaId: emp.id || emp.cnpj,
-        empresaNome: emp.nome,
-        modoExecucao: "lote",
-        onLog: (msg) => pushLog(msg),
-      });
-    } else {
-      await runManualDownloadSimulado({
-        dataInicial,
-        dataFinal,
-        tipoNota,
-        baixarXml,
-        baixarPdf,
-        pastaDestino,
-        empresaId: emp.id || emp.cnpj,
-        empresaNome: emp.nome,
-        modoExecucao: "lote",
-        onLog: (msg) => pushLog(msg),
-      });
     }
   }
 
   pushLog("--------------------------------------------------------------");
-  pushLog(
-    `[BOT] Execução em lote finalizada com sucesso (${
-      usePortal ? "modo REAL / portal" : "simulação"
-    }).`
-  );
+  pushLog(`[BOT] Execução em lote finalizada.`);
 
-  return { logs, paths };
+  return { logs, paths: { jobDir: loteJobPaths.jobDir } };
 }

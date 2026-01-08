@@ -10,8 +10,7 @@
 
     <style>
       body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
       /* TEMA ESCURO PRETO/BRANCO */
@@ -127,25 +126,22 @@
   <body class="min-h-screen bg-slate-50">
     <div class="min-h-screen flex flex-col">
       <!-- Topbar -->
-      <header
-        class="w-full border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-20"
-      >
-        <div
-          class="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-4"
-        >
+      <header class="w-full border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-4">
           <div class="flex items-center gap-3">
-            <div
-              class="h-9 w-9 rounded-lg border border-slate-300 flex items-center justify-center text-[11px] font-semibold tracking-[0.18em]"
-            >
-              IA
-            </div>
             <div class="leading-tight">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                NFSe Emissor Nacional
-              </p>
-              <p class="text-sm text-slate-400">
-                Console inteligente de notas fiscais eletrônicas
-              </p>
+              <div class="flex items-center gap-2">
+                <p class="text-xs uppercase tracking-[0.18em] text-slate-500">NFSe Emissor Nacional</p>
+
+                <!-- ✅ versão -->
+                <span
+                  class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600"
+                >
+                  v0.1.0
+                </span>
+              </div>
+
+              <p class="text-sm text-slate-400">Console inteligente de notas fiscais eletrônicas</p>
             </div>
           </div>
 
@@ -164,15 +160,29 @@
                 <!-- Sol -->
                 <span id="themeSunIcon" class="text-slate-700">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
-                    <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path
+                      d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    />
+                    <path
+                      d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
                   </svg>
                 </span>
 
                 <!-- Lua -->
                 <span id="themeMoonIcon" class="text-slate-400">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <path
+                      d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linejoin="round"
+                    />
                   </svg>
                 </span>
               </span>
@@ -184,9 +194,7 @@
               ></span>
             </button>
 
-            <div
-              class="flex items-center gap-3 bg-slate-50/80 border border-slate-200 rounded-full px-3 py-1.5"
-            >
+            <div class="flex items-center gap-3 bg-slate-50/80 border border-slate-200 rounded-full px-3 py-1.5">
               <div
                 id="userAvatar"
                 class="h-7 w-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-semibold"
@@ -194,15 +202,8 @@
                 ?
               </div>
               <div class="leading-tight">
-                <p class="text-[10px] uppercase tracking-wide text-slate-400">
-                  Usuário logado
-                </p>
-                <p
-                  id="userNameDisplay"
-                  class="text-xs font-medium text-slate-700"
-                >
-                  ...
-                </p>
+                <p class="text-[10px] uppercase tracking-wide text-slate-400">Usuário logado</p>
+                <p id="userNameDisplay" class="text-xs font-medium text-slate-700">...</p>
               </div>
               <button
                 id="logoutBtn"
@@ -219,9 +220,7 @@
       <main class="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 py-6 space-y-6">
         <!-- Tabs (centralizadas) -->
         <div class="flex justify-center">
-          <div
-            class="inline-flex rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden"
-          >
+          <div class="inline-flex rounded-full border border-slate-200 bg-white shadow-sm overflow-hidden">
             <button
               data-tab="download"
               class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -236,9 +235,17 @@
             </button>
             <button
               data-tab="historico"
-              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium text-slate-600 hover:bg-slate-50"
+              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium border-r border-slate-200 text-slate-600 hover:bg-slate-50"
             >
               Histórico
+            </button>
+
+            <!-- ✅ NOVA ABA placeholder -->
+            <button
+              data-tab="emissao"
+              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Emissão NF (em breve)
             </button>
           </div>
         </div>
@@ -249,25 +256,18 @@
           class="tab-panel space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
                  min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
-          <div
-            class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-          >
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h2 class="text-base font-semibold text-slate-800">
-                Download manual de NFS-e
-              </h2>
+              <h2 class="text-base font-semibold text-slate-800">Download manual de NFS-e</h2>
               <p class="text-xs md:text-sm text-slate-500">
-                Configure o robô para baixar notas de uma única empresa com
-                controle de período, tipo de nota e formato.
+                Configure o robô para baixar notas de uma única empresa com controle de período, tipo de nota e formato.
               </p>
             </div>
           </div>
 
           <!-- GRID: Configurações x Logs -->
-          <div
-            class="mt-4 grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-5 items-stretch"
-          >
-            <!-- Coluna esquerda: toda configuração do manual -->
+          <div class="mt-4 grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-5 items-stretch">
+            <!-- Coluna esquerda -->
             <div class="space-y-4">
               <!-- Botão portal + texto -->
               <div class="flex flex-col md:flex-row md:items-center gap-4">
@@ -278,19 +278,15 @@
                   Abrir portal NFS-e
                 </button>
                 <p class="text-xs md:text-sm text-slate-500">
-                  Abre o Emissor Nacional em uma nova aba. Faça o login
-                  normalmente ou deixe o robô logar usando as credenciais abaixo.
+                  Abre o Emissor Nacional em uma nova aba. Faça o login normalmente ou deixe o robô logar usando as
+                  credenciais abaixo.
                 </p>
               </div>
 
               <!-- Login / Senha -->
-              <div
-                class="grid md:grid-cols-3 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100"
-              >
+              <div class="grid md:grid-cols-3 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
                 <div>
-                  <label
-                    for="manualLoginPortal"
-                    class="block text-xs md:text-sm font-medium text-slate-700"
+                  <label for="manualLoginPortal" class="block text-xs md:text-sm font-medium text-slate-700"
                     >CNPJ ou login no portal</label
                   >
                   <input
@@ -299,15 +295,11 @@
                     class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                     placeholder="Digite o CNPJ ou login do portal"
                   />
-                  <p class="mt-1 text-[11px] text-slate-500">
-                    Ex.: CNPJ completo ou usuário cadastrado no Emissor Nacional.
-                  </p>
+                  <p class="mt-1 text-[11px] text-slate-500">Ex.: CNPJ completo ou usuário cadastrado no Emissor Nacional.</p>
                 </div>
 
                 <div>
-                  <label
-                    for="manualSenhaPortal"
-                    class="block text-xs md:text-sm font-medium text-slate-700"
+                  <label for="manualSenhaPortal" class="block text-xs md:text-sm font-medium text-slate-700"
                     >Senha do portal</label
                   >
                   <input
@@ -316,110 +308,84 @@
                     class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                     placeholder="Senha"
                   />
-                  <p class="mt-1 text-[11px] text-slate-500">
-                    Usada apenas localmente pelo robô para fazer o login.
-                  </p>
+                  <p class="mt-1 text-[11px] text-slate-500">Usada apenas localmente pelo robô para fazer o login.</p>
                 </div>
 
                 <div class="flex items-end">
                   <p class="text-[11px] text-slate-500">
-                    Preencha <span class="font-semibold">login</span> e
-                    <span class="font-semibold">senha</span> para o robô acessar
-                    o portal automaticamente.
+                    Preencha <span class="font-semibold">login</span> e <span class="font-semibold">senha</span> para o robô
+                    acessar o portal automaticamente.
                   </p>
                 </div>
               </div>
 
-              <!-- Período + tipo + formatos -->
-              <div
-                class="grid md:grid-cols-3 gap-5 items-end bg-slate-50 rounded-xl p-5 border border-slate-100"
-              >
-                <div>
-                  <label
-                    for="dataInicial"
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    >Data inicial</label
-                  >
-                  <input
-                    id="dataInicial"
-                    type="date"
-                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    for="dataFinal"
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    >Data final</label
-                  >
-                  <input
-                    id="dataFinal"
-                    type="date"
-                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
-                  />
-                </div>
-
-                <div class="space-y-3">
-                  <span
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    >Tipo de nota</span
-                  >
-                  <div class="flex items-center gap-6 text-xs md:text-sm">
-                    <label class="inline-flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="tipoNota"
-                        value="emitidas"
-                        checked
-                        class="text-slate-900 focus:ring-slate-900"
-                      />
-                      <span>Notas emitidas (Saída)</span>
-                    </label>
-                    <label class="inline-flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="tipoNota"
-                        value="recebidas"
-                        class="text-slate-900 focus:ring-slate-900"
-                      />
-                      <span>Notas recebidas (Entrada)</span>
-                    </label>
+              <!-- ✅ AJUSTE: Período (em cima) + Tipo (abaixo) + Formatos (abaixo) -->
+              <div class="bg-slate-50 rounded-xl p-5 border border-slate-100 space-y-4">
+                <!-- Datas em cima -->
+                <div class="grid md:grid-cols-2 gap-5">
+                  <div>
+                    <label for="dataInicial" class="block text-xs md:text-sm font-medium text-slate-700">Data inicial</label>
+                    <input
+                      id="dataInicial"
+                      type="date"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    />
                   </div>
 
-                  <div class="flex items-center gap-6 text-xs md:text-sm">
+                  <div>
+                    <label for="dataFinal" class="block text-xs md:text-sm font-medium text-slate-700">Data final</label>
+                    <input
+                      id="dataFinal"
+                      type="date"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <!-- Tipo de nota abaixo -->
+                <div class="space-y-2">
+                  <span class="block text-xs md:text-sm font-medium text-slate-700">Tipo de nota</span>
+
+                  <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs md:text-sm">
                     <label class="inline-flex items-center gap-2">
-                      <input
-                        id="baixarXml"
-                        type="checkbox"
-                        checked
-                        class="text-slate-900 focus:ring-slate-900"
-                      />
-                      <span>Baixar XML</span>
+                      <input type="radio" name="tipoNota" value="todas" checked class="text-slate-900 focus:ring-slate-900" />
+                      <span><strong>Todas</strong> </span>
                     </label>
+
                     <label class="inline-flex items-center gap-2">
-                      <input
-                        id="baixarPdf"
-                        type="checkbox"
-                        checked
-                        class="text-slate-900 focus:ring-slate-900"
-                      />
-                      <span>Baixar PDF</span>
+                      <input type="radio" name="tipoNota" value="emitidas" class="text-slate-900 focus:ring-slate-900" />
+                      <span>Emitidas</span>
+                    </label>
+
+                    <label class="inline-flex items-center gap-2">
+                      <input type="radio" name="tipoNota" value="recebidas" class="text-slate-900 focus:ring-slate-900" />
+                      <span>Recebidas</span>
+                    </label>
+
+                    <label class="inline-flex items-center gap-2">
+                      <input type="radio" name="tipoNota" value="canceladas" class="text-slate-900 focus:ring-slate-900" />
+                      <span>Canceladas</span>
                     </label>
                   </div>
+                </div>
+
+                <!-- Formatos abaixo -->
+                <div class="flex items-center gap-6 text-xs md:text-sm">
+                  <label class="inline-flex items-center gap-2">
+                    <input id="baixarXml" type="checkbox" checked class="text-slate-900 focus:ring-slate-900" />
+                    <span>Baixar XML</span>
+                  </label>
+                  <label class="inline-flex items-center gap-2">
+                    <input id="baixarPdf" type="checkbox" checked class="text-slate-900 focus:ring-slate-900" />
+                    <span>Baixar PDF</span>
+                  </label>
                 </div>
               </div>
 
               <!-- Pasta + botão iniciar -->
-              <div
-                class="flex flex-col md:flex-row md:items-center gap-4 bg-slate-50 rounded-xl p-5 border border-slate-100"
-              >
+              <div class="flex flex-col md:flex-row md:items-center gap-4 bg-slate-50 rounded-xl p-5 border border-slate-100">
                 <div class="flex-1">
-                  <label
-                    for="pastaDestino"
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    >Pasta de destino</label
-                  >
+                  <label for="pastaDestino" class="block text-xs md:text-sm font-medium text-slate-700">Pasta de destino</label>
 
                   <div class="flex flex-col md:flex-row gap-2">
                     <button
@@ -440,10 +406,8 @@
                   </div>
 
                   <p class="mt-1 text-xs md:text-sm text-slate-500">
-                    O robô criará
-                    <span class="font-medium">Entrada</span> e
-                    <span class="font-medium">Saída</span> dentro dessa pasta no
-                    servidor.
+                    O robô criará subpastas <span class="font-medium">Emitidas</span>, <span class="font-medium">Recebidas</span> e
+                    <span class="font-medium">Canceladas</span> dentro dessa pasta no servidor.
                   </p>
                 </div>
 
@@ -457,21 +421,13 @@
             </div>
 
             <!-- Coluna direita: logs (acompanha a tela) -->
-            <div
-              class="bg-slate-50 rounded-xl p-5 border border-slate-100 flex flex-col
-                     lg:sticky lg:top-24 max-h-[calc(100vh-140px)]"
-            >
-              <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
-                Logs de progresso
-              </h4>
-              <p class="text-[11px] text-slate-500 mb-2">
-                Acompanhe aqui tudo o que o robô está fazendo em tempo real.
-              </p>
+            <div class="bg-slate-50 rounded-xl p-5 border border-slate-100 flex flex-col lg:sticky lg:top-24 max-h-[calc(100vh-140px)]">
+              <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">Logs de progresso</h4>
+              <p class="text-[11px] text-slate-500 mb-2">Acompanhe aqui tudo o que o robô está fazendo em tempo real.</p>
 
               <div
                 id="logsDownload"
-                class="flex-1 min-h-0 overflow-y-auto text-xs md:text-sm font-mono
-                       bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
+                class="flex-1 min-h-0 overflow-y-auto text-xs md:text-sm font-mono bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
               >
                 <div class="text-slate-500">Aguardando início do download...</div>
               </div>
@@ -485,32 +441,21 @@
           class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
                  min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
-          <div
-            class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-          >
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h2 class="text-base font-semibold text-slate-800">
-                Gerenciar empresas e execução em lote
-              </h2>
+              <h2 class="text-base font-semibold text-slate-800">Gerenciar empresas e execução em lote</h2>
               <p class="text-xs md:text-sm text-slate-500">
-                Cadastre empresas e rode o robô para todas de uma vez com o
-                mesmo período e configuração.
+                Cadastre empresas e rode o robô para todas de uma vez com o mesmo período e configuração.
               </p>
             </div>
           </div>
 
           <div class="grid md:grid-cols-3 gap-5">
             <div class="md:col-span-2">
-              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">
-                Empresas cadastradas
-              </h3>
+              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">Empresas cadastradas</h3>
 
-              <table
-                class="w-full text-xs md:text-sm border border-slate-200 rounded-xl overflow-hidden"
-              >
-                <thead
-                  class="bg-slate-100 text-slate-600 border-b border-slate-200"
-                >
+              <table class="w-full text-xs md:text-sm border border-slate-200 rounded-xl overflow-hidden">
+                <thead class="bg-slate-100 text-slate-600 border-b border-slate-200">
                   <tr>
                     <th class="px-3 py-2 text-left">ID</th>
                     <th class="px-3 py-2 text-left">Nome</th>
@@ -531,18 +476,10 @@
 
             <!-- Criar Empresa -->
             <div>
-              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">
-                Adicionar nova empresa
-              </h3>
-              <div
-                class="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3"
-              >
+              <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-2">Adicionar nova empresa</h3>
+              <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
                 <div>
-                  <label
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    for="nomeEmpresa"
-                    >Nome amigável</label
-                  >
+                  <label class="block text-xs md:text-sm font-medium text-slate-700" for="nomeEmpresa">Nome amigável</label>
                   <input
                     id="nomeEmpresa"
                     class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
@@ -550,11 +487,7 @@
                   />
                 </div>
                 <div>
-                  <label
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    for="cnpjEmpresa"
-                    >CNPJ</label
-                  >
+                  <label class="block text-xs md:text-sm font-medium text-slate-700" for="cnpjEmpresa">CNPJ</label>
                   <input
                     id="cnpjEmpresa"
                     class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
@@ -562,11 +495,7 @@
                   />
                 </div>
                 <div>
-                  <label
-                    class="block text-xs md:text-sm font-medium text-slate-700"
-                    for="senhaPortal"
-                    >Senha portal</label
-                  >
+                  <label class="block text-xs md:text-sm font-medium text-slate-700" for="senhaPortal">Senha portal</label>
                   <input
                     id="senhaPortal"
                     class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
@@ -582,10 +511,7 @@
                   Salvar empresa
                 </button>
 
-                <div
-                  id="feedbackEmpresa"
-                  class="hidden text-xs md:text-sm mt-1"
-                ></div>
+                <div id="feedbackEmpresa" class="hidden text-xs md:text-sm mt-1"></div>
               </div>
             </div>
           </div>
@@ -594,28 +520,22 @@
 
           <!-- Execução Lote -->
           <div class="border border-slate-200 rounded-xl p-5 bg-slate-50">
-            <div
-              class="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-4"
-            >
+            <div class="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-4 items-stretch">
               <!-- Esquerda: configuração do lote -->
               <div class="space-y-3">
                 <div>
-                  <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
-                    Execução em lote (todas as empresas)
-                  </h3>
+                  <h3 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">Execução em lote (todas as empresas)</h3>
                   <p class="text-[11px] md:text-xs text-slate-500">
-                    O mesmo período e configuração será aplicado para todas as
-                    empresas cadastradas.
+                    O mesmo período e configuração será aplicado para todas as empresas cadastradas.
                   </p>
                 </div>
 
-                <!-- Período + Tipo -->
-                <div class="flex flex-col md:flex-row md:items-end gap-4 text-xs md:text-sm">
-                  <div class="flex flex-col md:flex-row gap-3 md:items-end">
+                <!-- ✅ AJUSTE: Período em cima + Tipo abaixo + Formatos abaixo -->
+                <div class="bg-white/0 rounded-xl space-y-3">
+                  <!-- Datas em cima -->
+                  <div class="grid md:grid-cols-2 gap-4 text-xs md:text-sm">
                     <div>
-                      <label
-                        for="loteDataInicial"
-                        class="block text-xs md:text-sm font-medium text-slate-700"
+                      <label for="loteDataInicial" class="block text-xs md:text-sm font-medium text-slate-700"
                         >Período comum - Data inicial</label
                       >
                       <input
@@ -624,12 +544,9 @@
                         class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                       />
                     </div>
+
                     <div>
-                      <label
-                        for="loteDataFinal"
-                        class="block text-xs md:text-sm font-medium text-slate-700"
-                        >Data final</label
-                      >
+                      <label for="loteDataFinal" class="block text-xs md:text-sm font-medium text-slate-700">Data final</label>
                       <input
                         id="loteDataFinal"
                         type="date"
@@ -638,62 +555,50 @@
                     </div>
                   </div>
 
+                  <!-- Tipo abaixo -->
                   <div class="flex flex-col gap-1">
-                    <span class="text-xs md:text-sm font-medium text-slate-700"
-                      >Tipo de nota (Lote)</span
-                    >
-                    <div class="flex items-center gap-6">
+                    <span class="text-xs md:text-sm font-medium text-slate-700">Tipo de nota (Lote)</span>
+
+                    <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs md:text-sm">
                       <label class="inline-flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="loteTipoNota"
-                          value="emitidas"
-                          checked
-                          class="text-slate-900 focus:ring-slate-900"
-                        />
+                        <input type="radio" name="loteTipoNota" value="todas" checked class="text-slate-900 focus:ring-slate-900" />
+                        <span><strong>Todas</strong></span>
+                      </label>
+
+                      <label class="inline-flex items-center gap-2">
+                        <input type="radio" name="loteTipoNota" value="emitidas" class="text-slate-900 focus:ring-slate-900" />
                         <span>Emitidas</span>
                       </label>
+
                       <label class="inline-flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="loteTipoNota"
-                          value="recebidas"
-                          class="text-slate-900 focus:ring-slate-900"
-                        />
+                        <input type="radio" name="loteTipoNota" value="recebidas" class="text-slate-900 focus:ring-slate-900" />
                         <span>Recebidas</span>
+                      </label>
+
+                      <label class="inline-flex items-center gap-2">
+                        <input type="radio" name="loteTipoNota" value="canceladas" class="text-slate-900 focus:ring-slate-900" />
+                        <span>Canceladas</span>
                       </label>
                     </div>
                   </div>
-                </div>
 
-                <!-- Formatos -->
-                <div class="flex items-center gap-6 text-xs md:text-sm">
-                  <label class="inline-flex items-center gap-2">
-                    <input
-                      id="loteBaixarXml"
-                      type="checkbox"
-                      class="text-slate-900 focus:ring-slate-900"
-                      checked
-                    />
-                    <span>Baixar XML (Lote)</span>
-                  </label>
-                  <label class="inline-flex items-center gap-2">
-                    <input
-                      id="loteBaixarPdf"
-                      type="checkbox"
-                      class="text-slate-900 focus:ring-slate-900"
-                      checked
-                    />
-                    <span>Baixar PDF (Lote)</span>
-                  </label>
+                  <!-- Formatos abaixo -->
+                  <div class="flex items-center gap-6 text-xs md:text-sm">
+                    <label class="inline-flex items-center gap-2">
+                      <input id="loteBaixarXml" type="checkbox" class="text-slate-900 focus:ring-slate-900" checked />
+                      <span>Baixar XML (Lote)</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                      <input id="loteBaixarPdf" type="checkbox" class="text-slate-900 focus:ring-slate-900" checked />
+                      <span>Baixar PDF (Lote)</span>
+                    </label>
+                  </div>
                 </div>
 
                 <!-- Pasta + botão -->
                 <div class="flex flex-col md:flex-row md:items-center gap-4 mt-2">
                   <div class="flex-1">
-                    <label
-                      for="lotePastaDestino"
-                      class="block text-xs md:text-sm font-medium text-slate-700"
+                    <label for="lotePastaDestino" class="block text-xs md:text-sm font-medium text-slate-700"
                       >Pasta de destino (Lote)</label
                     >
 
@@ -716,9 +621,8 @@
                     </div>
 
                     <p class="mt-1 text-xs md:text-sm text-slate-500">
-                      Usada para criar
-                      <span class="font-medium">Entrada</span> e
-                      <span class="font-medium">Saída</span> para cada empresa.
+                      Usada para criar subpastas <span class="font-medium">Emitidas</span>, <span class="font-medium">Recebidas</span> e
+                      <span class="font-medium">Canceladas</span> para cada empresa.
                     </p>
                   </div>
 
@@ -732,17 +636,12 @@
               </div>
 
               <!-- Direita: logs do lote -->
-              <div class="bg-slate-100 rounded-xl p-4 border border-slate-300 flex flex-col">
-                <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">
-                  Logs de progresso (Lote)
-                </h4>
-                <p class="text-[11px] text-slate-500 mb-2">
-                  Visualize o andamento da execução para cada empresa.
-                </p>
+              <div class="bg-slate-100 rounded-xl p-4 border border-slate-300 flex flex-col lg:sticky lg:top-24 max-h-[calc(100vh-140px)]">
+                <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">Logs de progresso (Lote)</h4>
+                <p class="text-[11px] text-slate-500 mb-2">Visualize o andamento da execução para cada empresa.</p>
                 <div
                   id="logsLote"
-                  class="min-h-[140px] max-h-72 overflow-y-auto text-xs md:text-sm font-mono
-                         bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300 flex-1"
+                  class="flex-1 min-h-0 overflow-y-auto text-xs md:text-sm font-mono bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
                 >
                   <div class="text-slate-500">Nenhuma execução iniciada ainda.</div>
                 </div>
@@ -758,12 +657,9 @@
                  min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
           <div>
-            <h2 class="text-base font-semibold text-slate-800 mb-1">
-              Histórico de execuções
-            </h2>
+            <h2 class="text-base font-semibold text-slate-800 mb-1">Histórico de execuções</h2>
             <p class="text-xs md:text-sm text-slate-500">
-              Todas as execuções do robô (manual e em lote), com data, empresa,
-              status e quantidade de arquivos.
+              Todas as execuções do robô (manual e em lote), com data, empresa, status e quantidade de arquivos.
             </p>
           </div>
 
@@ -792,14 +688,29 @@
             </table>
           </div>
 
-          <p
-            id="historicoEmptyState"
-            class="mt-2 text-xs md:text-sm text-slate-500"
-            style="display: none;"
-          >
-            Nenhuma execução encontrada ainda. Rode um download manual ou em
-            lote para ver o histórico aqui.
+          <p id="historicoEmptyState" class="mt-2 text-xs md:text-sm text-slate-500" style="display: none">
+            Nenhuma execução encontrada ainda. Rode um download manual ou em lote para ver o histórico aqui.
           </p>
+        </section>
+
+        <!-- Painel Emissão -->
+        <section
+          id="tab-emissao"
+          class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
+                 min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
+        >
+          <div>
+            <h2 class="text-base font-semibold text-slate-800 mb-1">Emissão de NFS-e (em construção)</h2>
+            <p class="text-xs md:text-sm text-slate-500">
+              Vamos ativar essa parte depois que o download (emitidas/recebidas/canceladas) estiver 100% estável no site novo.
+            </p>
+          </div>
+
+          <div class="border border-slate-200 rounded-xl p-5 bg-slate-50">
+            <p class="text-xs md:text-sm text-slate-600">
+              Placeholder: aqui entraremos com o fluxo de emissão (tomador, serviços, valores, retenções, etc.).
+            </p>
+          </div>
         </section>
       </main>
     </div>

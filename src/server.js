@@ -1,3 +1,4 @@
+// src/server.js
 import "dotenv/config";
 
 import express from "express";
@@ -59,7 +60,7 @@ function writeEmpresas(empresas) {
   fs.writeFileSync(EMPRESAS_FILE, JSON.stringify(empresas, null, 2), "utf-8");
 }
 
-// Rotas de empresas (o front já chama /api/empresas)
+// Rotas de empresas
 app.get("/api/empresas", (req, res) => {
   const empresas = readEmpresas();
   return res.json(empresas);
@@ -124,38 +125,97 @@ function zipDirectory(sourceDir, zipFilePath) {
 app.use("/api/historico", historicoRoutes);
 
 // ---------------------------
+// ✅ Validação de período (backend)
+// ---------------------------
+function assertPeriodo(req, res) {
+  const { dataInicial, dataFinal } = req.body || {};
+  if (!dataInicial || !dataFinal) {
+    res.status(400).json({
+      success: false,
+      error: "Informe dataInicial e dataFinal (obrigatório).",
+    });
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------
+// Helpers: tipos selecionados
+// ---------------------------
+function normalizeTipos(processarTipos, tipoNotaFallback) {
+  const allow = new Set(["emitidas", "recebidas", "canceladas"]);
+
+  const arr = Array.isArray(processarTipos) ? processarTipos : [];
+  const clean = arr.map((t) => String(t).toLowerCase()).filter((t) => allow.has(t));
+
+  if (clean.length) return Array.from(new Set(clean));
+
+  // fallback (compatível com UI antiga de radio)
+  const t = (tipoNotaFallback || "emitidas").toLowerCase();
+  return allow.has(t) ? [t] : ["emitidas"];
+}
+
+// ---------------------------
 // ROBÔ – MANUAL
+// Agora: respeita o que o usuário escolher (1, 2 ou 3 tipos)
+// e gera 1 ZIP com as pastas selecionadas.
 // ---------------------------
 app.post("/api/nf/manual", async (req, res) => {
   try {
-    const result = await runManualDownload({
+    if (!assertPeriodo(req, res)) return;
+
+    // ✅ booleans garantidos (corrige bug "só PDF" / "só XML")
+    const baixarXml = !!req.body?.baixarXml;
+    const baixarPdf = !!req.body?.baixarPdf;
+
+    const tipos = normalizeTipos(req.body?.processarTipos, req.body?.tipoNota);
+
+    const baseBody = {
       ...req.body,
+      baixarXml,
+      baixarPdf,
       onLog: (msg) => console.log(msg),
-    });
+    };
 
-    const logs = result?.logs || [];
+    let allLogs = [];
 
-    // ✅ fallback para não “perder” a pasta caso o bot retorne com outro nome
-    const finalDir =
-      result?.paths?.finalDir ||
-      result?.finalDir ||
-      result?.outputDir ||
-      result?.paths?.outputDir ||
-      null;
+    // ✅ cria 1 jobDir raiz (passando null aqui força o bot a criar)
+    // a primeira execução devolve o paths.jobDir correto
+    let rootJobDir = null;
+
+    for (const tipoNota of tipos) {
+      const result = await runManualDownload({
+        ...baseBody,
+        tipoNota,
+        // ✅ importante: todas as execuções do manual usam o MESMO rootJobDir
+        jobDir: rootJobDir || undefined,
+      });
+
+      (result?.logs || []).forEach((m) => allLogs.push(m));
+
+      if (!rootJobDir) {
+        rootJobDir =
+          result?.paths?.jobDir ||
+          result?.jobDir ||
+          null;
+      }
+    }
 
     let downloadZipUrl = null;
 
-    if (finalDir && fs.existsSync(finalDir)) {
+    const zipTarget = rootJobDir && fs.existsSync(rootJobDir) ? rootJobDir : null;
+
+    if (zipTarget) {
       const zipName = `nfse-manual-${Date.now()}.zip`;
       const zipPath = path.join(ZIP_DIR, zipName);
 
-      await zipDirectory(finalDir, zipPath);
+      await zipDirectory(zipTarget, zipPath);
       downloadZipUrl = `/zips/${zipName}`;
     }
 
     return res.json({
       success: true,
-      logs,
+      logs: allLogs,
       downloadZipUrl,
     });
   } catch (err) {
@@ -169,9 +229,13 @@ app.post("/api/nf/manual", async (req, res) => {
 
 // ---------------------------
 // ROBÔ – LOTE
+// Agora: respeita o que o usuário escolher (1, 2 ou 3 tipos)
+// e gera 1 ZIP com tudo do lote.
 // ---------------------------
 app.post("/api/nf/lote", async (req, res) => {
   try {
+    if (!assertPeriodo(req, res)) return;
+
     const empresas = readEmpresas();
 
     if (!empresas || empresas.length === 0) {
@@ -181,19 +245,25 @@ app.post("/api/nf/lote", async (req, res) => {
       });
     }
 
-    // ✅ agora passa as empresas cadastradas pro robô
+    // ✅ booleans garantidos
+    const baixarXml = !!req.body?.baixarXml;
+    const baixarPdf = !!req.body?.baixarPdf;
+
+    const tipos = normalizeTipos(req.body?.processarTipos, req.body?.tipoNota);
+
     const result = await runLoteDownload(empresas, {
       ...req.body,
+      baixarXml,
+      baixarPdf,
       onLog: (msg) => console.log(msg),
+      processarTipos: tipos,
     });
 
     const logs = result?.logs || [];
 
     const finalDir =
-      result?.paths?.finalDir ||
-      result?.finalDir ||
-      result?.outputDir ||
-      result?.paths?.outputDir ||
+      result?.paths?.jobDir ||
+      result?.jobDir ||
       null;
 
     let downloadZipUrl = null;

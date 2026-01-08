@@ -79,7 +79,6 @@ function applyThemeUI(isDark) {
   }
 }
 
-// estado inicial pelo localStorage/body
 (function initTheme() {
   const savedTheme = localStorage.getItem("nfseTheme") || "light";
   const startDark = savedTheme === "dark";
@@ -140,7 +139,7 @@ function clearLogs(element) {
 }
 
 // ---------------------------
-// ✅ AJUSTE: esconder campo/botão de "copiar caminho" (se ainda existir no HTML)
+// esconder UI de caminho (se existir)
 // ---------------------------
 function hideServerPathUI() {
   const idsToHide = [
@@ -171,21 +170,135 @@ function hideServerPathUI() {
 hideServerPathUI();
 
 // ---------------------------
-// ✅ NOVO: baixar ZIP automaticamente quando o backend retornar downloadZipUrl
+// baixar ZIP automaticamente
 // ---------------------------
 function triggerZipDownload(zipUrl) {
   if (!zipUrl) return;
 
   const a = document.createElement("a");
   a.href = zipUrl;
-  a.download = ""; // deixa o navegador decidir o nome do arquivo
+  a.download = "";
   document.body.appendChild(a);
   a.click();
   a.remove();
 }
 
 // ---------------------------
-// Helper: pegar config atual de download (bloco principal)
+// ✅ leitura de "tipos"
+// - Se tiver checkboxes (UI nova): usa elas
+// - Se for rádio antigo: agora entende "todas"
+// ---------------------------
+function getSelectedTipos(prefix = "") {
+  const idEmit = `${prefix}TipoEmitidas`;
+  const idRec = `${prefix}TipoRecebidas`;
+  const idCan = `${prefix}TipoCanceladas`;
+  const idAll = `${prefix}TipoTodas`;
+
+  const elEmit = document.getElementById(idEmit);
+  const elRec = document.getElementById(idRec);
+  const elCan = document.getElementById(idCan);
+  const elAll = document.getElementById(idAll);
+
+  const hasNewUI = !!(elEmit || elRec || elCan || elAll);
+
+  if (hasNewUI) {
+    if (elAll && elAll.checked) return ["emitidas", "recebidas", "canceladas"];
+
+    const tipos = [];
+    if (elEmit && elEmit.checked) tipos.push("emitidas");
+    if (elRec && elRec.checked) tipos.push("recebidas");
+    if (elCan && elCan.checked) tipos.push("canceladas");
+
+    return tipos.length ? tipos : ["emitidas"];
+  }
+
+  // Fallback UI antiga (rádio)
+  const radioName = prefix ? "loteTipoNota" : "tipoNota";
+  const tipoNotaRadio = document.querySelector(
+    `input[name='${radioName}']:checked`
+  );
+  const tipoNota = tipoNotaRadio ? tipoNotaRadio.value : "emitidas";
+
+  // ✅ CORREÇÃO: "todas" precisa virar as 3 opções
+  if (String(tipoNota).toLowerCase() === "todas") {
+    return ["emitidas", "recebidas", "canceladas"];
+  }
+
+  return [tipoNota];
+}
+
+// ✅ sincronizar "todas" (checkbox UI nova, se existir)
+function wireTodasCheckbox(prefix = "") {
+  const elAll = document.getElementById(`${prefix}TipoTodas`);
+  const elEmit = document.getElementById(`${prefix}TipoEmitidas`);
+  const elRec = document.getElementById(`${prefix}TipoRecebidas`);
+  const elCan = document.getElementById(`${prefix}TipoCanceladas`);
+
+  if (!elAll || (!elEmit && !elRec && !elCan)) return;
+
+  elAll.addEventListener("change", () => {
+    const v = elAll.checked;
+    if (elEmit) elEmit.checked = v;
+    if (elRec) elRec.checked = v;
+    if (elCan) elCan.checked = v;
+  });
+
+  const refreshAll = () => {
+    const allChecked =
+      (!!elEmit ? elEmit.checked : true) &&
+      (!!elRec ? elRec.checked : true) &&
+      (!!elCan ? elCan.checked : true);
+
+    elAll.checked = allChecked;
+  };
+
+  [elEmit, elRec, elCan].filter(Boolean).forEach((el) => {
+    el.addEventListener("change", refreshAll);
+  });
+
+  refreshAll();
+}
+
+wireTodasCheckbox("");
+wireTodasCheckbox("lote");
+
+// ---------------------------
+// validação/auto-correção de período
+// ---------------------------
+function parseISODateInput(v) {
+  if (!v) return null;
+  const parts = String(v).split("-");
+  if (parts.length !== 3) return null;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  return new Date(y, m - 1, d);
+}
+
+function maybeSwapPeriodoInUI({ dataInicialId, dataFinalId, logsEl }) {
+  const diEl = document.getElementById(dataInicialId);
+  const dfEl = document.getElementById(dataFinalId);
+  if (!diEl || !dfEl) return;
+
+  const di = parseISODateInput(diEl.value);
+  const df = parseISODateInput(dfEl.value);
+
+  if (!di || !df) return;
+
+  if (di.getTime() > df.getTime()) {
+    addLog(
+      logsEl,
+      "[AVISO] Período invertido detectado (Data inicial > Data final). Corrigindo automaticamente (trocando as datas)."
+    );
+    const tmp = diEl.value;
+    diEl.value = dfEl.value;
+    dfEl.value = tmp;
+  }
+}
+
+// ---------------------------
+// Helper: pegar config atual de download
 // ---------------------------
 function getDownloadConfig() {
   const dataInicialEl = document.getElementById("dataInicial");
@@ -197,18 +310,26 @@ function getDownloadConfig() {
   const manualLoginEl = document.getElementById("manualLoginPortal");
   const manualSenhaEl = document.getElementById("manualSenhaPortal");
 
-  const tipoNotaRadio = document.querySelector("input[name='tipoNota']:checked");
-  const tipoNota = tipoNotaRadio ? tipoNotaRadio.value : "emitidas";
+  const processarTipos = getSelectedTipos("");
+
+  const tipoNota = processarTipos[0] || "emitidas";
 
   return {
     dataInicial: dataInicialEl ? dataInicialEl.value || null : null,
     dataFinal: dataFinalEl ? dataFinalEl.value || null : null,
+
     tipoNota,
+    processarTipos,
+
     baixarXml: !!(baixarXmlEl && baixarXmlEl.checked),
     baixarPdf: !!(baixarPdfEl && baixarPdfEl.checked),
+
     pastaDestino:
       pastaDestinoEl && pastaDestinoEl.value ? pastaDestinoEl.value : "downloads",
-    login: manualLoginEl && manualLoginEl.value.trim() ? manualLoginEl.value.trim() : null,
+    login:
+      manualLoginEl && manualLoginEl.value.trim()
+        ? manualLoginEl.value.trim()
+        : null,
     senha: manualSenhaEl && manualSenhaEl.value ? manualSenhaEl.value : null,
   };
 }
@@ -221,11 +342,9 @@ const loteDataFinalEl = document.getElementById("loteDataFinal");
 const dataInicialEl = document.getElementById("dataInicial");
 const dataFinalEl = document.getElementById("dataFinal");
 
-// flags de formatos no lote
 const loteBaixarXmlEl = document.getElementById("loteBaixarXml");
 const loteBaixarPdfEl = document.getElementById("loteBaixarPdf");
 
-// pasta destino (manual + lote)
 const pastaDestinoInput = document.getElementById("pastaDestino");
 const lotePastaDestinoInput = document.getElementById("lotePastaDestino");
 const loteSelecionarPastaBtn = document.getElementById("loteSelecionarPastaBtn");
@@ -239,7 +358,6 @@ function syncLotePeriodoToMain() {
   }
 }
 
-// sincronizar XML/PDF do lote para o bloco principal
 function syncLoteFormatosToMain() {
   const mainXml = document.getElementById("baixarXml");
   const mainPdf = document.getElementById("baixarPdf");
@@ -266,25 +384,6 @@ if (loteBaixarPdfEl) {
   loteBaixarPdfEl.addEventListener("change", syncLoteFormatosToMain);
 }
 
-// Sincronizar tipo de nota do lote com o tipo de nota principal
-const loteTipoRadios = document.querySelectorAll("input[name='loteTipoNota']");
-const tipoNotaRadios = document.querySelectorAll("input[name='tipoNota']");
-
-function syncLoteTipoToMain() {
-  let loteTipo = "emitidas";
-  loteTipoRadios.forEach((r) => {
-    if (r.checked) loteTipo = r.value;
-  });
-
-  tipoNotaRadios.forEach((r) => {
-    r.checked = r.value === loteTipo;
-  });
-}
-
-loteTipoRadios.forEach((r) => {
-  r.addEventListener("change", syncLoteTipoToMain);
-});
-
 window.addEventListener("DOMContentLoaded", () => {
   if (dataInicialEl && loteDataInicialEl) {
     loteDataInicialEl.value = dataInicialEl.value;
@@ -293,17 +392,6 @@ window.addEventListener("DOMContentLoaded", () => {
     loteDataFinalEl.value = dataFinalEl.value;
   }
 
-  if (tipoNotaRadios.length && loteTipoRadios.length) {
-    let mainTipo = "emitidas";
-    tipoNotaRadios.forEach((r) => {
-      if (r.checked) mainTipo = r.value;
-    });
-    loteTipoRadios.forEach((r) => {
-      r.checked = r.value === mainTipo;
-    });
-  }
-
-  // XML/PDF do lote começam iguais ao manual
   const mainXml = document.getElementById("baixarXml");
   const mainPdf = document.getElementById("baixarPdf");
 
@@ -314,7 +402,6 @@ window.addEventListener("DOMContentLoaded", () => {
     loteBaixarPdfEl.checked = mainPdf.checked;
   }
 
-  // Pasta do lote começa igual à pasta do manual
   if (pastaDestinoInput && lotePastaDestinoInput) {
     lotePastaDestinoInput.value = pastaDestinoInput.value || "downloads";
   }
@@ -323,7 +410,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // ---------------------------
-// Botões (abrir navegador / pasta / download / lote)
+// Botões
 // ---------------------------
 const abrirNavegadorBtn = document.getElementById("abrirNavegadorBtn");
 if (abrirNavegadorBtn) {
@@ -358,7 +445,6 @@ if (selecionarPastaBtn && pastaDestinoInput) {
   });
 }
 
-// Selecionar pasta específica do lote
 if (loteSelecionarPastaBtn && lotePastaDestinoInput) {
   loteSelecionarPastaBtn.addEventListener("click", () => {
     const atual =
@@ -375,12 +461,49 @@ if (loteSelecionarPastaBtn && lotePastaDestinoInput) {
   });
 }
 
+function validatePeriodo(config, logsEl) {
+  if (!config.dataInicial || !config.dataFinal) {
+    addLog(logsEl, "[ERRO] Data inicial e Data final são obrigatórias.");
+    return false;
+  }
+
+  if (!config.baixarXml && !config.baixarPdf) {
+    addLog(logsEl, "[ERRO] Selecione pelo menos um formato: XML e/ou PDF.");
+    return false;
+  }
+
+  if (!Array.isArray(config.processarTipos) || config.processarTipos.length === 0) {
+    addLog(
+      logsEl,
+      "[ERRO] Selecione pelo menos um tipo de nota (Emitidas/Recebidas/Canceladas)."
+    );
+    return false;
+  }
+
+  const di = parseISODateInput(config.dataInicial);
+  const df = parseISODateInput(config.dataFinal);
+  if (di && df && di.getTime() > df.getTime()) {
+    addLog(logsEl, "[ERRO] Período inválido: Data inicial está maior que Data final.");
+    return false;
+  }
+
+  return true;
+}
+
 const iniciarDownloadBtn = document.getElementById("iniciarDownloadBtn");
 if (iniciarDownloadBtn) {
   iniciarDownloadBtn.addEventListener("click", async () => {
     clearLogs(logsDownload);
 
+    maybeSwapPeriodoInUI({
+      dataInicialId: "dataInicial",
+      dataFinalId: "dataFinal",
+      logsEl: logsDownload,
+    });
+
     const config = getDownloadConfig();
+
+    if (!validatePeriodo(config, logsDownload)) return;
 
     if (!config.login || !config.senha) {
       addLog(
@@ -390,7 +513,7 @@ if (iniciarDownloadBtn) {
       return;
     }
 
-    addLog(logsDownload, "[INFO] Enviando requisição para o robô de download de NFS-e...");
+    addLog(logsDownload, "[INFO] Enviando requisição para o robô...");
 
     try {
       const res = await fetch("/api/nf/manual", {
@@ -401,13 +524,15 @@ if (iniciarDownloadBtn) {
 
       if (!res.ok) {
         addLog(logsDownload, `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`);
+        const txt = await res.text().catch(() => "");
+        if (txt) addLog(logsDownload, txt);
         return;
       }
 
       const data = await res.json();
 
       if (!data.success) {
-        addLog(logsDownload, "[ERRO] O robô não conseguiu concluir o download.");
+        addLog(logsDownload, "[ERRO] O robô não conseguiu concluir.");
         if (data.error) addLog(logsDownload, `Detalhe: ${data.error}`);
         return;
       }
@@ -415,15 +540,14 @@ if (iniciarDownloadBtn) {
       if (Array.isArray(data.logs) && data.logs.length > 0) {
         data.logs.forEach((msg) => addLog(logsDownload, msg));
       } else {
-        addLog(logsDownload, "[OK] Download concluído. (Sem logs detalhados retornados.)");
+        addLog(logsDownload, "[OK] Concluído (sem logs detalhados).");
       }
 
-      // ✅ baixar ZIP se o backend retornar
       if (data.downloadZipUrl) {
         addLog(logsDownload, `[OK] ZIP gerado. Baixando: ${data.downloadZipUrl}`);
         triggerZipDownload(data.downloadZipUrl);
       } else {
-        addLog(logsDownload, "[AVISO] Nenhum ZIP retornado pelo servidor (pode não ter encontrado pasta final).");
+        addLog(logsDownload, "[AVISO] Nenhum ZIP retornado.");
       }
 
       hideServerPathUI();
@@ -439,8 +563,13 @@ if (baixarTudoBtn) {
   baixarTudoBtn.addEventListener("click", async () => {
     clearLogs(logsLote);
 
+    maybeSwapPeriodoInUI({
+      dataInicialId: "loteDataInicial",
+      dataFinalId: "loteDataFinal",
+      logsEl: logsLote,
+    });
+
     syncLotePeriodoToMain();
-    syncLoteTipoToMain();
     syncLoteFormatosToMain();
 
     if (lotePastaDestinoInput && pastaDestinoInput) {
@@ -452,7 +581,23 @@ if (baixarTudoBtn) {
 
     const config = getDownloadConfig();
 
-    addLog(logsLote, "[INFO] Enviando requisição para execução em lote (todas as empresas)...");
+    if (loteBaixarXmlEl) config.baixarXml = !!loteBaixarXmlEl.checked;
+    if (loteBaixarPdfEl) config.baixarPdf = !!loteBaixarPdfEl.checked;
+
+    const tiposLote = getSelectedTipos("lote");
+    config.processarTipos = tiposLote;
+    config.tipoNota = tiposLote[0] || "emitidas";
+
+    if (loteDataInicialEl && loteDataInicialEl.value) config.dataInicial = loteDataInicialEl.value;
+    if (loteDataFinalEl && loteDataFinalEl.value) config.dataFinal = loteDataFinalEl.value;
+
+    if (lotePastaDestinoInput && lotePastaDestinoInput.value.trim()) {
+      config.pastaDestino = lotePastaDestinoInput.value.trim();
+    }
+
+    if (!validatePeriodo(config, logsLote)) return;
+
+    addLog(logsLote, "[INFO] Enviando requisição para execução em lote...");
 
     try {
       const res = await fetch("/api/nf/lote", {
@@ -471,7 +616,7 @@ if (baixarTudoBtn) {
       const data = await res.json();
 
       if (!data.success) {
-        addLog(logsLote, "[ERRO] O robô não conseguiu concluir a execução em lote.");
+        addLog(logsLote, "[ERRO] O robô não conseguiu concluir o lote.");
         if (data.error) addLog(logsLote, `Detalhe: ${data.error}`);
         return;
       }
@@ -479,15 +624,14 @@ if (baixarTudoBtn) {
       if (Array.isArray(data.logs) && data.logs.length > 0) {
         data.logs.forEach((msg) => addLog(logsLote, msg));
       } else {
-        addLog(logsLote, "[OK] Execução em lote concluída. (Sem logs detalhados retornados.)");
+        addLog(logsLote, "[OK] Lote concluído (sem logs detalhados).");
       }
 
-      // ✅ baixar ZIP se o backend retornar
       if (data.downloadZipUrl) {
         addLog(logsLote, `[OK] ZIP do lote gerado. Baixando: ${data.downloadZipUrl}`);
         triggerZipDownload(data.downloadZipUrl);
       } else {
-        addLog(logsLote, "[AVISO] Nenhum ZIP retornado pelo servidor (pode não ter encontrado pasta final).");
+        addLog(logsLote, "[AVISO] Nenhum ZIP retornado.");
       }
 
       hideServerPathUI();
