@@ -93,7 +93,8 @@
 
       /* Tabelas e logs */
       body.dark-mode #logsDownload,
-      body.dark-mode #logsLote {
+      body.dark-mode #logsLote,
+      body.dark-mode #logsEmissao {
         background-color: #020617 !important;
         color: #e5e7eb !important;
         border-color: #1f2937 !important;
@@ -160,11 +161,7 @@
                 <!-- Sol -->
                 <span id="themeSunIcon" class="text-slate-700">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    />
+                    <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
                     <path
                       d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"
                       stroke="currentColor"
@@ -240,12 +237,9 @@
               Histórico
             </button>
 
-            <!-- ✅ NOVA ABA placeholder -->
-            <button
-              data-tab="emissao"
-              class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Emissão NF (em breve)
+            <!-- ✅ ABA EMISSÃO -->
+            <button data-tab="emissao" class="tab-btn px-5 py-2.5 text-xs md:text-sm font-medium text-slate-600 hover:bg-slate-50">
+              Emissão NF
             </button>
           </div>
         </div>
@@ -693,21 +687,253 @@
           </p>
         </section>
 
-        <!-- Painel Emissão -->
+        <!-- ✅ Painel Emissão -->
         <section
           id="tab-emissao"
           class="tab-panel hidden space-y-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-6
                  min-h-[calc(100vh-220px)] md:min-h-[calc(100vh-240px)]"
         >
-          <div>
-            <h2 class="text-base font-semibold text-slate-800 mb-1">Emissão de NFS-e (em construção)</h2>
-            
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <h2 class="text-base font-semibold text-slate-800 mb-1">Emissão de NFS-e (Portal)</h2>
+              <p class="text-xs md:text-sm text-slate-500">
+                Fluxo pela tela <strong>Emissão Completa</strong> (Pessoas → Serviço → Valores → Emitir NFS-e).
+              </p>
+            </div>
+
+            <div class="flex gap-2">
+              <button
+                id="abrirPortalEmissaoBtn"
+                class="bg-primary-btn inline-flex items-center justify-center px-5 py-2.5 text-xs md:text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-black transition-colors"
+              >
+                Abrir portal NFS-e
+              </button>
+
+              <button
+                id="salvarSessaoEmissaoBtn"
+                class="inline-flex items-center justify-center px-5 py-2.5 text-xs md:text-sm font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
+              >
+                Salvar sessão
+              </button>
+            </div>
           </div>
 
-          <div class="border border-slate-200 rounded-xl p-5 bg-slate-50">
-            <p class="text-xs md:text-sm text-slate-600">
-              Placeholder: aqui entraremos com o fluxo de emissão.
-            </p>
+          <div class="mt-4 grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)] gap-5 items-stretch">
+            <!-- Esquerda: formulário -->
+            <div class="space-y-4">
+              <div class="bg-slate-50 rounded-xl p-5 border border-slate-100 space-y-4">
+
+                <!-- ✅ NOVO: Cadastro de empresa (Aba Emissão) -->
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                      <p class="text-xs md:text-sm font-semibold text-slate-700">Empresa</p>
+                      <p class="text-[11px] text-slate-500">
+                        Cadastre o <strong>prestador</strong> aqui para aparecer no select. 
+                      </p>
+                    </div>
+                    <button
+                      id="emissaoRemoverEmpresaBtn"
+                      type="button"
+                      class="inline-flex items-center justify-center px-4 py-2 text-xs md:text-sm rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled
+                    >
+                      Remover empresa selecionada
+                    </button>
+                  </div>
+
+                  <div class="mt-3 grid md:grid-cols-3 gap-3">
+                    <div>
+                      <label class="block text-xs md:text-sm font-medium text-slate-700">Nome</label>
+                      <input
+                        id="emissaoNovaEmpresaNome"
+                        type="text"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs md:text-sm"
+                        placeholder="Nome da Empresa"
+                      />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs md:text-sm font-medium text-slate-700">CNPJ</label>
+                      <input
+                        id="emissaoNovaEmpresaCnpj"
+                        type="text"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs md:text-sm"
+                        placeholder="Somente números ou com máscara"
+                      />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs md:text-sm font-medium text-slate-700">Município</label>
+                      <input
+                        id="emissaoNovaEmpresaMunicipio"
+                        type="text"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs md:text-sm"
+                        placeholder="Ex: Curitiba"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="mt-3 flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
+                    <button
+                      id="emissaoAddEmpresaBtn"
+                      type="button"
+                      class="inline-flex items-center justify-center px-4 py-2 text-xs md:text-sm rounded-lg bg-slate-900 text-white hover:bg-black"
+                    >
+                      Cadastrar empresa (Emissão)
+                    </button>
+
+                    <div id="emissaoEmpresaFeedback" class="text-[11px] text-slate-500"></div>
+                  </div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">Empresa (prestador)</label>
+                    <select
+                      id="emissaoEmpresaSelect"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    >
+                      <option value="">Carregando...</option>
+                    </select>
+                    
+                  </div>
+
+                  <div>
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">Data de competência</label>
+                    <input
+                      id="emissaoDataCompetencia"
+                      type="date"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <!-- ✅ Certificado A1 -->
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                      <p class="text-xs md:text-sm font-semibold text-slate-700">Certificado A1 (PFX) — emissão via API</p>
+                      <p class="text-[11px] text-slate-500">
+                        Anexe o <strong>.pfx/.p12</strong> e a senha. O arquivo é salvo no servidor e vinculado à empresa selecionada.
+                      </p>
+                    </div>
+                    <button
+                      id="salvarCertPfxBtn"
+                      type="button"
+                      class="inline-flex items-center justify-center px-4 py-2 text-xs md:text-sm rounded-lg bg-slate-900 text-white hover:bg-black"
+                    >
+                      Salvar certificado
+                    </button>
+                  </div>
+
+                  <div class="mt-3 grid md:grid-cols-3 gap-3">
+                    <div class="md:col-span-2">
+                      <label class="block text-xs md:text-sm font-medium text-slate-700">Arquivo PFX</label>
+                      <input
+                        id="emissaoCertPfxFile"
+                        type="file"
+                        accept=".pfx,.p12,application/x-pkcs12"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs md:text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs md:text-sm font-medium text-slate-700">Senha do PFX</label>
+                      <input
+                        id="emissaoCertPfxPass"
+                        type="password"
+                        class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs md:text-sm"
+                        placeholder="Senha do certificado"
+                      />
+                    </div>
+                  </div>
+
+                  <div id="emissaoCertStatus" class="mt-2 text-[11px] text-slate-500"></div>
+                </div>
+
+                <hr class="border-slate-200" />
+
+                <div class="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">Tomador (CPF/CNPJ)</label>
+                    <input
+                      id="emissaoTomadorDocumento"
+                      type="text"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      placeholder="CPF ou CNPJ"
+                    />
+                  </div>
+
+                  <div class="md:col-span-2">
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">Nome/Razão Social do tomador</label>
+                    <input
+                      id="emissaoTomadorNome"
+                      type="text"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      placeholder="Nome do tomador"
+                    />
+                  </div>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-4">
+                  <div class="md:col-span-2">
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">E-mail do tomador (opcional)</label>
+                    <input
+                      id="emissaoTomadorEmail"
+                      type="email"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      placeholder="email@exemplo.com"
+                    />
+                  </div>
+
+                  <div>
+                    <label class="block text-xs md:text-sm font-medium text-slate-700">Valor do serviço (R$)</label>
+                    <input
+                      id="emissaoValor"
+                      type="text"
+                      class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                      placeholder="Ex: 600,00"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs md:text-sm font-medium text-slate-700">Descrição do serviço</label>
+                  <textarea
+                    id="emissaoDescricao"
+                    rows="4"
+                    class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                    placeholder="Ex: Serviços contábeis referentes ao mês..."
+                  ></textarea>
+                </div>
+
+                <div class="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+
+                  <button
+                    id="emitirNfseBtn"
+                    class="bg-primary-btn inline-flex items-center justify-center px-6 py-2.5 text-xs md:text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-black transition-colors"
+                  >
+                    Emitir NFS-e
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Direita: logs -->
+            <div class="bg-slate-50 rounded-xl p-5 border border-slate-100 flex flex-col lg:sticky lg:top-24 max-h-[calc(100vh-140px)]">
+              <h4 class="text-xs md:text-sm font-semibold text-slate-700 mb-1">Logs de emissão</h4>
+              <p class="text-[11px] text-slate-500 mb-2">
+                Aqui aparecem todos os passos do robô (login, menu, páginas e emissão).
+              </p>
+
+              <div
+                id="logsEmissao"
+                class="flex-1 min-h-0 overflow-y-auto text-xs md:text-sm font-mono bg-slate-100 text-slate-800 rounded-xl p-4 border border-slate-300"
+              >
+                <div class="text-slate-500">Aguardando ação...</div>
+              </div>
+            </div>
           </div>
         </section>
       </main>
@@ -725,5 +951,8 @@
 
     <script src="/js/dashboard.js"></script>
     <script src="/js/historico.js"></script>
+
+    <!-- ✅ novo -->
+    <script src="/js/emissao.js"></script>
   </body>
 </html>

@@ -185,8 +185,6 @@ function triggerZipDownload(zipUrl) {
 
 // ---------------------------
 // ✅ leitura de "tipos"
-// - Se tiver checkboxes (UI nova): usa elas
-// - Se for rádio antigo: agora entende "todas"
 // ---------------------------
 function getSelectedTipos(prefix = "") {
   const idEmit = `${prefix}TipoEmitidas`;
@@ -212,14 +210,12 @@ function getSelectedTipos(prefix = "") {
     return tipos.length ? tipos : ["emitidas"];
   }
 
-  // Fallback UI antiga (rádio)
   const radioName = prefix ? "loteTipoNota" : "tipoNota";
   const tipoNotaRadio = document.querySelector(
     `input[name='${radioName}']:checked`
   );
   const tipoNota = tipoNotaRadio ? tipoNotaRadio.value : "emitidas";
 
-  // ✅ CORREÇÃO: "todas" precisa virar as 3 opções
   if (String(tipoNota).toLowerCase() === "todas") {
     return ["emitidas", "recebidas", "canceladas"];
   }
@@ -227,7 +223,6 @@ function getSelectedTipos(prefix = "") {
   return [tipoNota];
 }
 
-// ✅ sincronizar "todas" (checkbox UI nova, se existir)
 function wireTodasCheckbox(prefix = "") {
   const elAll = document.getElementById(`${prefix}TipoTodas`);
   const elEmit = document.getElementById(`${prefix}TipoEmitidas`);
@@ -651,6 +646,15 @@ const removerEmpresaBtn = document.getElementById("removerEmpresaBtn");
 let empresas = [];
 let empresaSelecionadaId = null;
 
+function normalizeEmpresa(emp) {
+  return {
+    id: emp?.id ?? emp?.empresaId ?? emp?._id ?? emp?.cnpj ?? "",
+    nome: emp?.nome ?? emp?.empresaNome ?? emp?.razaoSocial ?? emp?.fantasia ?? "",
+    cnpj: emp?.cnpj ?? emp?.empresaCnpj ?? emp?.documento ?? "",
+    raw: emp,
+  };
+}
+
 function renderEmpresas() {
   if (!empresasTableBody) return;
 
@@ -669,15 +673,17 @@ function renderEmpresas() {
     return;
   }
 
-  empresas.forEach((emp) => {
+  empresas.forEach((empRaw) => {
+    const emp = normalizeEmpresa(empRaw);
+
     const tr = document.createElement("tr");
     tr.className = "border-t border-slate-100 hover:bg-sky-50 cursor-pointer";
     tr.dataset.id = emp.id;
 
     tr.innerHTML = `
-      <td class="px-3 py-2 text-slate-600">${emp.id}</td>
-      <td class="px-3 py-2 text-slate-800">${emp.nome}</td>
-      <td class="px-3 py-2 text-slate-600">${emp.cnpj}</td>
+      <td class="px-3 py-2 text-slate-600">${emp.id || "—"}</td>
+      <td class="px-3 py-2 text-slate-800">${emp.nome || "—"}</td>
+      <td class="px-3 py-2 text-slate-600">${emp.cnpj || "—"}</td>
     `;
 
     tr.addEventListener("click", () => {
@@ -704,7 +710,9 @@ async function loadEmpresasFromAPI() {
     }
 
     const data = await res.json();
-    empresas = Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data : Array.isArray(data?.empresas) ? data.empresas : [];
+
+    empresas = list;
     empresaSelecionadaId = null;
     if (removerEmpresaBtn) removerEmpresaBtn.disabled = true;
     renderEmpresas();
@@ -751,8 +759,12 @@ if (salvarEmpresaBtn) {
         return;
       }
 
-      const novaEmpresa = await res.json();
-      empresas.push(novaEmpresa);
+      const json = await res.json();
+
+      // ✅ ÚNICA CORREÇÃO: aceitar resposta { ok:true, empresa:{...} } OU empresa direto
+      const empresaCriada = (json && json.empresa) ? json.empresa : json;
+
+      empresas.push(empresaCriada);
       renderEmpresas();
 
       document.getElementById("nomeEmpresa").value = "";
@@ -791,7 +803,11 @@ if (removerEmpresaBtn) {
         return;
       }
 
-      empresas = empresas.filter((e) => e.id !== empresaSelecionadaId);
+      empresas = empresas.filter((e) => {
+        const id = e?.id ?? e?.empresaId ?? e?._id ?? e?.cnpj ?? "";
+        return String(id) !== String(empresaSelecionadaId);
+      });
+
       empresaSelecionadaId = null;
       removerEmpresaBtn.disabled = true;
       renderEmpresas();

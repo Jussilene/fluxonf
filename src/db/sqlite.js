@@ -13,6 +13,13 @@ if (!fs.existsSync(dataDir)) {
 
 const db = new Database(dbPath);
 
+// ✅ pragmas seguros (melhora concorrência e estabilidade; não muda tua lógica)
+try {
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("foreign_keys = ON");
+} catch {}
+
 // cria tabela de histórico se não existir
 db.exec(`
   CREATE TABLE IF NOT EXISTS historico_execucoes (
@@ -34,5 +41,11 @@ db.exec(`
     detalhes TEXT             -- texto livre (ex: 'Baixou emitidas de 01/10 a 31/10')
   );
 `);
+
+// ✅ índices leves (não muda nada, só acelera listagens por usuário/empresa)
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hist_usuario_data ON historico_execucoes(usuarioEmail, dataHora);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hist_empresa_data ON historico_execucoes(empresaId, dataHora);`);
+} catch {}
 
 export default db;

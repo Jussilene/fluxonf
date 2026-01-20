@@ -14,6 +14,7 @@ function ensureDbFile() {
       fs.mkdirSync(DB_DIR, { recursive: true });
     }
 
+    // padrão do seu store: objeto { lastId, empresas }
     if (!fs.existsSync(DB_FILE)) {
       fs.writeFileSync(DB_FILE, JSON.stringify({ lastId: 0, empresas: [] }, null, 2));
     }
@@ -27,15 +28,20 @@ function readDb() {
   try {
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Formato inválido");
+
+    // ✅ se o arquivo estiver no formato antigo (array),
+    // converte automaticamente para o formato novo (objeto)
+    if (Array.isArray(parsed)) {
+      const converted = { lastId: parsed.length, empresas: parsed };
+      fs.writeFileSync(DB_FILE, JSON.stringify(converted, null, 2));
+      return converted;
     }
-    if (!Array.isArray(parsed.empresas)) {
-      parsed.empresas = [];
-    }
-    if (typeof parsed.lastId !== "number") {
-      parsed.lastId = 0;
-    }
+
+    if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
+
+    if (!Array.isArray(parsed.empresas)) parsed.empresas = [];
+    if (typeof parsed.lastId !== "number") parsed.lastId = 0;
+
     return parsed;
   } catch (err) {
     console.error("[EMPRESAS_DB] Erro ao ler banco. Recriando...", err);
@@ -58,13 +64,16 @@ export function listarEmpresas() {
   return db.empresas;
 }
 
+// ✅ ALIAS para corrigir seu import no nfseEmissao.controller.js
+// Assim você NÃO precisa mexer no controller e não quebra o que já existe.
+export function readEmpresas() {
+  return listarEmpresas();
+}
+
 export function adicionarEmpresa({ nome, cnpj, loginPortal, senhaPortal }) {
   const db = readDb();
 
-  const cleanCnpj = (cnpj || "")
-    .toString()
-    .replace(/\D/g, "");
-
+  const cleanCnpj = (cnpj || "").toString().replace(/\D/g, "");
   const now = new Date().toISOString();
 
   const novaEmpresa = {

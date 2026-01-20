@@ -9,7 +9,18 @@ import archiver from "archiver";
 import { fileURLToPath } from "url";
 
 import { runManualDownload, runLoteDownload } from "./bot/nfseBot.js";
-import historicoRoutes from "./routes/historico.routes.js";
+
+// ✅ usa o store único (não duplica banco no server)
+import { listarEmpresas, adicionarEmpresa, removerEmpresa } from "./utils/empresasStore.js";
+
+// ✅ HISTÓRICO está em src/emissao/routes/
+import historicoRoutes from "./emissao/routes/historico.routes.js";
+
+// ✅ rotas da emissão
+import emissaoRoutes from "./emissao/routes/emissao.routes.js";
+
+// ✅ garante tabela de emissão no SQLite
+import { ensureNfseEmissaoTables } from "./emissao/nfseEmissao.model.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,11 +29,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ---------------------------
+// ✅ Boot: garante tabelas
+// ---------------------------
+ensureNfseEmissaoTables();
+
+// ---------------------------
 // Middlewares
 // ---------------------------
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "25mb" })); // ✅ necessário pro base64 do PFX
+app.use(express.urlencoded({ extended: true, limit: "25mb" })); // ✅ idem
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // ---------------------------
@@ -34,71 +50,44 @@ if (!fs.existsSync(ZIP_DIR)) {
 }
 
 // ---------------------------
-// ✅ Empresas (persistência simples em JSON)
+// ✅ Empresas (store único em JSON: data/empresas.json)
 // ---------------------------
-const DATA_DIR = path.join(__dirname, "..", "data");
-const EMPRESAS_FILE = path.join(DATA_DIR, "empresas.json");
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(EMPRESAS_FILE)) {
-  fs.writeFileSync(EMPRESAS_FILE, JSON.stringify([], null, 2), "utf-8");
-}
-
-function readEmpresas() {
-  try {
-    const raw = fs.readFileSync(EMPRESAS_FILE, "utf-8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeEmpresas(empresas) {
-  fs.writeFileSync(EMPRESAS_FILE, JSON.stringify(empresas, null, 2), "utf-8");
-}
-
-// Rotas de empresas
+// GET /api/empresas -> retorna padrão { empresas: [...] } (e mantém compatibilidade)
 app.get("/api/empresas", (req, res) => {
-  const empresas = readEmpresas();
-  return res.json(empresas);
+  const empresas = listarEmpresas();
+  return res.json({ ok: true, empresas });
 });
 
+// POST /api/empresas
 app.post("/api/empresas", (req, res) => {
-  const { nome, cnpj, senhaPortal } = req.body || {};
+  const { nome, cnpj, loginPortal, senhaPortal, municipio } = req.body || {};
 
   if (!nome || !cnpj) {
-    return res.status(400).json({ error: "Nome e CNPJ são obrigatórios." });
+    return res.status(400).json({ ok: false, error: "Nome e CNPJ são obrigatórios." });
   }
 
-  const empresas = readEmpresas();
+  const nova = adicionarEmpresa({
+    nome,
+    cnpj,
+    loginPortal,
+    senhaPortal: senhaPortal || "",
+    municipio: municipio || "",
+  });
 
-  const novaEmpresa = {
-    id: String(Date.now()),
-    nome: String(nome).trim(),
-    cnpj: String(cnpj).trim(),
-    senhaPortal: senhaPortal ? String(senhaPortal) : "",
-  };
-
-  empresas.push(novaEmpresa);
-  writeEmpresas(empresas);
-
-  return res.status(201).json(novaEmpresa);
+  return res.status(201).json({ ok: true, empresa: nova });
 });
 
+// DELETE /api/empresas/:id
 app.delete("/api/empresas/:id", (req, res) => {
   const { id } = req.params;
-  const empresas = readEmpresas();
-  const novo = empresas.filter((e) => String(e.id) !== String(id));
+  const ok = removerEmpresa(id);
 
-  if (novo.length === empresas.length) {
-    return res.status(404).json({ error: "Empresa não encontrada." });
+  if (!ok) {
+    return res.status(404).json({ ok: false, error: "Empresa não encontrada." });
   }
 
-  writeEmpresas(novo);
-  return res.json({ success: true });
+  return res.json({ ok: true });
 });
 
 // ---------------------------
@@ -123,6 +112,11 @@ function zipDirectory(sourceDir, zipFilePath) {
 // Histórico
 // ---------------------------
 app.use("/api/historico", historicoRoutes);
+
+// ---------------------------
+// Emissão
+// ---------------------------
+app.use("/api/emissao", emissaoRoutes);
 
 // ---------------------------
 // ✅ Validação de período (backend)
@@ -157,14 +151,11 @@ function normalizeTipos(processarTipos, tipoNotaFallback) {
 
 // ---------------------------
 // ROBÔ – MANUAL
-// Agora: respeita o que o usuário escolher (1, 2 ou 3 tipos)
-// e gera 1 ZIP com as pastas selecionadas.
 // ---------------------------
 app.post("/api/nf/manual", async (req, res) => {
   try {
     if (!assertPeriodo(req, res)) return;
 
-    // ✅ booleans garantidos (corrige bug "só PDF" / "só XML")
     const baixarXml = !!req.body?.baixarXml;
     const baixarPdf = !!req.body?.baixarPdf;
 
@@ -178,26 +169,19 @@ app.post("/api/nf/manual", async (req, res) => {
     };
 
     let allLogs = [];
-
-    // ✅ cria 1 jobDir raiz (passando null aqui força o bot a criar)
-    // a primeira execução devolve o paths.jobDir correto
     let rootJobDir = null;
 
     for (const tipoNota of tipos) {
       const result = await runManualDownload({
         ...baseBody,
         tipoNota,
-        // ✅ importante: todas as execuções do manual usam o MESMO rootJobDir
         jobDir: rootJobDir || undefined,
       });
 
       (result?.logs || []).forEach((m) => allLogs.push(m));
 
       if (!rootJobDir) {
-        rootJobDir =
-          result?.paths?.jobDir ||
-          result?.jobDir ||
-          null;
+        rootJobDir = result?.paths?.jobDir || result?.jobDir || null;
       }
     }
 
@@ -229,14 +213,13 @@ app.post("/api/nf/manual", async (req, res) => {
 
 // ---------------------------
 // ROBÔ – LOTE
-// Agora: respeita o que o usuário escolher (1, 2 ou 3 tipos)
-// e gera 1 ZIP com tudo do lote.
 // ---------------------------
 app.post("/api/nf/lote", async (req, res) => {
   try {
     if (!assertPeriodo(req, res)) return;
 
-    const empresas = readEmpresas();
+    // ✅ pega do store único
+    const empresas = listarEmpresas();
 
     if (!empresas || empresas.length === 0) {
       return res.status(400).json({
@@ -245,7 +228,6 @@ app.post("/api/nf/lote", async (req, res) => {
       });
     }
 
-    // ✅ booleans garantidos
     const baixarXml = !!req.body?.baixarXml;
     const baixarPdf = !!req.body?.baixarPdf;
 
@@ -261,10 +243,7 @@ app.post("/api/nf/lote", async (req, res) => {
 
     const logs = result?.logs || [];
 
-    const finalDir =
-      result?.paths?.jobDir ||
-      result?.jobDir ||
-      null;
+    const finalDir = result?.paths?.jobDir || result?.jobDir || null;
 
     let downloadZipUrl = null;
 
