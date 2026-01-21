@@ -1,5 +1,5 @@
 // src/utils/empresasStore.js
-// "Banco de dados" simples em JSON para empresas do lote NFSe
+// "Banco de dados" simples em JSON para empresas do lote NFSe (AGORA multiusuário)
 
 import fs from "fs";
 import path from "path";
@@ -59,18 +59,26 @@ function writeDb(data) {
   }
 }
 
-export function listarEmpresas() {
+// ✅ Agora aceita userEmail opcional.
+// - Se vier userEmail: lista só daquele usuário
+// - Se não vier: comportamento antigo (lista tudo)
+export function listarEmpresas(userEmail = "") {
   const db = readDb();
-  return db.empresas;
+  const u = String(userEmail || "").trim().toLowerCase();
+
+  if (!u) return db.empresas;
+
+  return db.empresas.filter((e) => String(e.userEmail || "").trim().toLowerCase() === u);
 }
 
-// ✅ ALIAS para corrigir seu import no nfseEmissao.controller.js
-// Assim você NÃO precisa mexer no controller e não quebra o que já existe.
-export function readEmpresas() {
-  return listarEmpresas();
+// ✅ ALIAS para compatibilidade
+export function readEmpresas(userEmail = "") {
+  return listarEmpresas(userEmail);
 }
 
-export function adicionarEmpresa({ nome, cnpj, loginPortal, senhaPortal }) {
+// ✅ Agora aceita userEmail opcional.
+// - Se vier userEmail: grava empresa “pertencendo” ao usuário
+export function adicionarEmpresa({ nome, cnpj, loginPortal, senhaPortal, municipio, userEmail }) {
   const db = readDb();
 
   const cleanCnpj = (cnpj || "").toString().replace(/\D/g, "");
@@ -82,7 +90,12 @@ export function adicionarEmpresa({ nome, cnpj, loginPortal, senhaPortal }) {
     cnpj: cleanCnpj,
     loginPortal: (loginPortal || cleanCnpj || "").trim(),
     senhaPortal: senhaPortal || "",
+    municipio: (municipio || "").toString().trim(),
     ativo: true,
+
+    // ✅ DONO (multi-tenant)
+    userEmail: (userEmail || "").toString().trim(),
+
     createdAt: now,
     updatedAt: now,
   };
@@ -94,12 +107,27 @@ export function adicionarEmpresa({ nome, cnpj, loginPortal, senhaPortal }) {
   return novaEmpresa;
 }
 
-export function removerEmpresa(id) {
+// ✅ Agora aceita userEmail opcional.
+// - Se vier userEmail: só remove se a empresa for daquele usuário
+// - Se não vier: comportamento antigo (remove global)
+export function removerEmpresa(id, userEmail = "") {
   const db = readDb();
   const idNum = Number(id);
+  const u = String(userEmail || "").trim().toLowerCase();
 
   const before = db.empresas.length;
-  db.empresas = db.empresas.filter((emp) => emp.id !== idNum);
+
+  db.empresas = db.empresas.filter((emp) => {
+    if (Number(emp.id) !== idNum) return true;
+
+    // se não tiver userEmail informado, remove como antes
+    if (!u) return false;
+
+    // se tiver userEmail, só remove se for dono
+    const owner = String(emp.userEmail || "").trim().toLowerCase();
+    return owner !== u;
+  });
+
   const after = db.empresas.length;
 
   if (after !== before) {

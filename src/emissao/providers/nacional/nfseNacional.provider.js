@@ -2,6 +2,7 @@
 import fs from "fs";
 import path from "path";
 import https from "https";
+import tls from "tls";
 import zlib from "zlib";
 import archiver from "archiver";
 import { PassThrough } from "stream";
@@ -15,11 +16,6 @@ function ensureDir(dir) {
 /**
  * Normaliza baseUrl para SEMPRE ficar no padrão:
  *   https://.../API/SefinNacional
- *
- * Aceita entradas comuns:
- * - https://.../SefinNacional
- * - https://.../API/SefinNacional
- * - https://.../API/SefinNacional/
  */
 function normalizeBaseUrl(raw) {
   const s = String(raw || "").trim();
@@ -27,22 +23,13 @@ function normalizeBaseUrl(raw) {
 
   let u = s.replace(/\/+$/g, "");
 
-  // Se o usuário colou o domínio sem /API/SefinNacional, ajusta:
-  // casos:
-  //  - .../SefinNacional  => .../API/SefinNacional
-  //  - .../API/SefinNacional => ok
-  //  - .../API/SefinNacional/ => ok
   if (/\/SefinNacional$/i.test(u)) {
     u = u.replace(/\/SefinNacional$/i, "/API/SefinNacional");
   } else if (!/\/API\/SefinNacional$/i.test(u)) {
-    // Se não tem /API/SefinNacional, tenta anexar.
-    // Ex: https://sefin.producaorestrita.nfse.gov.br  => .../API/SefinNacional
     u = u.replace(/\/+$/g, "") + "/API/SefinNacional";
   }
 
-  // Evita duplicações tipo /API/SefinNacional/API/SefinNacional
   u = u.replace(/(\/API\/SefinNacional)+/gi, "/API/SefinNacional");
-
   return u.replace(/\/+$/g, "");
 }
 
@@ -55,9 +42,6 @@ function getConfig({ certConfig } = {}) {
     String(process.env.NFSE_DANFSE_BASE_URL || "").trim() ||
     "https://adn.producaorestrita.nfse.gov.br/danfse";
 
-  // ✅ AJUSTE MÍNIMO:
-  // Aceita tanto os nomes antigos (pfxPath/passphrase) quanto os nomes novos
-  // que sua UI/backend usam (certPfxPath/certPfxPassphrase)
   const pfxPath =
     String(certConfig?.certPfxPath || certConfig?.pfxPath || "").trim() ||
     String(process.env.NFSE_CERT_PFX_PATH || "").trim();
@@ -66,7 +50,6 @@ function getConfig({ certConfig } = {}) {
     String(certConfig?.certPfxPassphrase || certConfig?.passphrase || "").trim() ||
     String(process.env.NFSE_CERT_PFX_PASSPHRASE || "").trim();
 
-  // ✅ modo zip (padrão agora: gzip)
   const zipMode = String(process.env.NFSE_API_ZIP_MODE || "gzip").trim().toLowerCase();
 
   if (!pfxPath) throw new Error("NFSE_CERT_PFX_PATH não configurado (nem na empresa, nem no .env).");
@@ -75,9 +58,23 @@ function getConfig({ certConfig } = {}) {
   return { baseUrl, danfseBaseUrl, pfxPath, passphrase, zipMode };
 }
 
-function makeHttpsAgent({ pfxPath, passphrase }) {
+function makeHttpsAgent({ pfxPath, passphrase }, onLog = () => {}) {
+  const pfxBuf = fs.readFileSync(pfxPath);
+
+  // ✅ AJUSTE MÍNIMO: valida o PFX antes da request (senha errada / PFX inválido)
+  try {
+    tls.createSecureContext({ pfx: pfxBuf, passphrase: passphrase || undefined });
+  } catch (e) {
+    throw new Error(
+      `Falha ao carregar PFX no Node (senha incorreta ou PFX inválido). ` +
+        `Arquivo: ${pfxPath}. Motivo: ${e?.message || e}`
+    );
+  }
+
+  onLog?.(`[NFSE] Usando PFX: ${pfxPath}`);
+
   return new https.Agent({
-    pfx: fs.readFileSync(pfxPath),
+    pfx: pfxBuf,
     passphrase: passphrase || undefined,
     keepAlive: true,
   });
@@ -91,13 +88,13 @@ async function httpRequest({ url, method = "GET", headers = {}, body = null, age
       {
         protocol: u.protocol,
         hostname: u.hostname,
-        servername: u.hostname, // ✅ SNI explícito (ajuda em alguns setups)
+        servername: u.hostname,
         port: u.port || 443,
         path: u.pathname + (u.search || ""),
         method,
         headers,
         agent,
-        minVersion: "TLSv1.2", // ✅ garante TLS 1.2+
+        minVersion: "TLSv1.2",
       },
       (res) => {
         const chunks = [];
@@ -116,12 +113,11 @@ async function httpRequest({ url, method = "GET", headers = {}, body = null, age
       }
     );
 
-    // ✅ DEBUG TLS (opcional): mostra se existe certificado LOCAL no socket
+    // DEBUG TLS opcional
     if (process.env.NFSE_DEBUG_TLS === "1") {
       req.on("socket", (socket) => {
         socket.on("secureConnect", () => {
           try {
-            // getCertificate() => cert LOCAL (cliente) / getPeerCertificate() => cert do servidor
             const local = socket.getCertificate?.() || null;
             const peer = socket.getPeerCertificate?.() || null;
 
@@ -196,7 +192,6 @@ function saveFiles({ chaveAcesso, xml, pdfBuffer }) {
   return { xmlPath, pdfPath };
 }
 
-// ✅ ZIP padrão (PKZIP) via archiver (mantido)
 async function zipPkzipSingleFileB64({ filename, contentBuf }) {
   return new Promise((resolve, reject) => {
     const archive = archiver("zip", { zlib: { level: 9 } });
@@ -231,17 +226,15 @@ async function zipPkzipSingleFileB64({ filename, contentBuf }) {
 
 export async function emitirNfseNacional({ payload, empresa, certConfig, onLog = () => {} }) {
   const cfg = getConfig({ certConfig });
-  const agent = makeHttpsAgent(cfg);
+  const agent = makeHttpsAgent(cfg, onLog);
 
   const dpsXml = resolveDpsXml({ payload, empresa, onLog });
 
-  // ✅ endpoint correto (baseUrl já é .../API/SefinNacional)
   const endpoint = `${cfg.baseUrl.replace(/\/$/, "")}/nfse`;
   onLog(`API: POST ${endpoint}`);
 
   const xmlBuf = Buffer.from(dpsXml, "utf8");
 
-  // ✅ por padrão agora: gzip
   let b64 = "";
   let mode = cfg.zipMode;
 
@@ -259,12 +252,6 @@ export async function emitirNfseNacional({ payload, empresa, certConfig, onLog =
 
   onLog(`Payload B64 size: ${b64.length}`);
 
-  /**
-   * ✅ Compatibilidade máxima:
-   * - Se for gzip, envia tanto dpsXmlGzipBase64 quanto dpsXmlZipB64 (mesmo conteúdo).
-   * - Se for pkzip, mantém dpsXmlZipB64.
-   * - Se for none, envia dpsXmlBase64 e também dpsXmlZipB64 (para não quebrar teu backend atual).
-   */
   const bodyObj =
     mode === "gzip"
       ? { dpsXmlGzipBase64: b64, dpsXmlZipB64: b64 }
@@ -345,7 +332,7 @@ export async function emitirNfseNacional({ payload, empresa, certConfig, onLog =
 
 export async function consultarNfseNacional({ chaveAcesso, certConfig, onLog = () => {} }) {
   const cfg = getConfig({ certConfig });
-  const agent = makeHttpsAgent(cfg);
+  const agent = makeHttpsAgent(cfg, onLog);
 
   const endpoint = `${cfg.baseUrl.replace(/\/$/, "")}/nfse/${encodeURIComponent(chaveAcesso)}`;
   onLog(`API: GET ${endpoint}`);
@@ -377,7 +364,7 @@ export async function consultarNfseNacional({ chaveAcesso, certConfig, onLog = (
 
 export async function cancelarNfseNacional({ chaveAcesso, justificativa, certConfig, onLog = () => {} }) {
   const cfg = getConfig({ certConfig });
-  const agent = makeHttpsAgent(cfg);
+  const agent = makeHttpsAgent(cfg, onLog);
 
   const endpoint = `${cfg.baseUrl.replace(/\/$/, "")}/nfse/${encodeURIComponent(chaveAcesso)}/cancelamento`;
   onLog(`API: POST ${endpoint}`);
@@ -390,7 +377,6 @@ export async function cancelarNfseNacional({ chaveAcesso, justificativa, certCon
 
   const xmlBuf = Buffer.from(payloadXml, "utf8");
 
-  // ✅ mantém PKZIP aqui por compatibilidade com teu fluxo atual
   const pedidoRegistroEventoXmlZipB64 = await zipPkzipSingleFileB64({
     filename: "cancelamento.xml",
     contentBuf: xmlBuf,

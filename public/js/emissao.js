@@ -28,7 +28,7 @@ function setCertStatus(msg, isError = false) {
 
 function setEmpresaFeedback(msg, isError = false) {
   const el = $("emissaoEmpresaFeedback");
-  if (!el) return; // ✅ ajuste: removido "demonstrated;"
+  if (!el) return;
   el.textContent = msg || "";
   el.className = "text-[11px] " + (isError ? "text-rose-600" : "text-slate-500");
 }
@@ -43,6 +43,16 @@ function getUser() {
   } catch {
     return { email: String(raw || "") };
   }
+}
+
+// ✅ AJUSTE MÍNIMO: headers padrão para multi-tenant
+// (Backend lê req.headers["x-user-email"] e filtra tudo por usuário)
+function apiHeaders(extra = {}) {
+  const user = getUser();
+  const email = (user?.email || "").toString().trim();
+  const h = { ...extra };
+  if (email) h["x-user-email"] = email;
+  return h;
 }
 
 function normalizeMoney(v) {
@@ -72,9 +82,10 @@ let _empresasCache = [];
 let _emissaoBooted = false;
 
 // ✅ AJUSTE ÚNICO: emissão 100% separada — não chama /api/empresas (lote)
+// ✅ + envia header x-user-email pra isolar por usuário
 async function fetchEmpresas() {
   try {
-    const r2 = await fetch("/api/emissao/empresas");
+    const r2 = await fetch("/api/emissao/empresas", { headers: apiHeaders() });
     if (!r2.ok) throw new Error("HTTP " + r2.status);
     const j2 = await r2.json();
     if (j2 && (j2.ok || j2.success)) return j2.empresas || [];
@@ -144,6 +155,7 @@ function renderEmpresasSelect(selectEl) {
 }
 
 // ✅ NECESSÁRIO: Cadastrar empresa (Aba Emissão)
+// ✅ AJUSTE: manda header + manda userEmail no body (compatível)
 async function cadastrarEmpresaEmissao() {
   const nomeEl = $("emissaoNovaEmpresaNome");
   const cnpjEl = $("emissaoNovaEmpresaCnpj");
@@ -152,6 +164,12 @@ async function cadastrarEmpresaEmissao() {
   const nome = (nomeEl?.value || "").trim();
   const cnpj = (cnpjEl?.value || "").trim();
   const municipio = (municipioEl?.value || "").trim();
+
+  const user = getUser();
+  if (!user?.email) {
+    setEmpresaFeedback("Usuário não encontrado no localStorage (nfseUser).", true);
+    return;
+  }
 
   if (!nome || !cnpj) {
     setEmpresaFeedback("Nome e CNPJ são obrigatórios.", true);
@@ -163,8 +181,8 @@ async function cadastrarEmpresaEmissao() {
   try {
     const r = await fetch("/api/emissao/empresas", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nome, cnpj, municipio }),
+      headers: apiHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ nome, cnpj, municipio, userEmail: user.email, usuarioEmail: user.email }),
     });
 
     const j = await r.json().catch(() => ({}));
@@ -188,7 +206,6 @@ async function cadastrarEmpresaEmissao() {
     if (select && j.empresa?.id != null) {
       select.value = String(j.empresa.id);
     } else if (select && _empresasCache.length) {
-      // fallback: selecion allow last
       const last = _empresasCache[_empresasCache.length - 1];
       const idVal = last.id ?? last.empresaId ?? last.cnpj ?? "";
       if (idVal) select.value = String(idVal);
@@ -201,6 +218,7 @@ async function cadastrarEmpresaEmissao() {
 }
 
 // ✅ NECESSÁRIO: Remover empresa (Aba Emissão)
+// ✅ AJUSTE: manda header x-user-email
 async function removerEmpresaEmissao() {
   const select = $("emissaoEmpresaSelect");
   const btnRem = $("emissaoRemoverEmpresaBtn");
@@ -216,6 +234,7 @@ async function removerEmpresaEmissao() {
   try {
     const r = await fetch(`/api/emissao/empresas/${encodeURIComponent(empresaId)}`, {
       method: "DELETE",
+      headers: apiHeaders(),
     });
 
     const j = await r.json().catch(() => ({}));
@@ -239,13 +258,15 @@ async function removerEmpresaEmissao() {
   }
 }
 
+// ✅ listar emissões gravadas
+// ✅ AJUSTE: manda header x-user-email (além da query já existente)
 async function listar(userEmail, empresaId) {
   try {
     const url =
       `/api/emissao/listar?usuarioEmail=${encodeURIComponent(userEmail)}` +
       `&empresaId=${encodeURIComponent(empresaId || "")}`;
 
-    const r = await fetch(url);
+    const r = await fetch(url, { headers: apiHeaders() });
     if (!r.ok) return;
 
     const j = await r.json();
@@ -334,7 +355,7 @@ async function initEmissao() {
 
   _emissaoBooted = true;
 
-  // ✅ bind cadastrar/remover (necessário pro card novo funcionar)
+  // bind cadastrar/remover (necessário pro card novo funcionar)
   if (btnAddEmpresa && btnAddEmpresa.dataset._bound !== "1") {
     btnAddEmpresa.dataset._bound = "1";
     btnAddEmpresa.addEventListener("click", cadastrarEmpresaEmissao);
@@ -411,7 +432,7 @@ async function initEmissao() {
 
         const r = await fetch("/api/emissao/certificado", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             usuarioEmail: user.email,
             empresaId,
@@ -464,7 +485,7 @@ async function initEmissao() {
       try {
         const r = await fetch("/api/emissao/salvar-sessao", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ usuarioEmail: user.email, empresaId }),
         });
 
@@ -559,7 +580,7 @@ async function initEmissao() {
       try {
         const r = await fetch("/api/emissao/emitir", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(payload),
         });
 

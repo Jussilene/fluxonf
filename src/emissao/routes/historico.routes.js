@@ -1,25 +1,28 @@
 // src/emissao/routes/historico.routes.js
 import { Router } from "express";
-
-// ✅ aqui é 2 níveis acima (src/emissao/routes -> src/db)
 import db from "../../db/sqlite.js";
 
 const router = Router();
 
 /**
  * GET /api/historico
- * Filtros opcionais:
- *  - ?usuarioEmail=...
- *  - ?limit=...
+ * Agora: por padrão filtra pelo usuário do header (x-user-email),
+ * mas mantém compatibilidade com ?usuarioEmail=...
  */
 router.get("/", (req, res) => {
   try {
-    const usuarioEmail = (req.query.usuarioEmail || "").toString().trim();
+    const headerUser = (req.userEmail || "").toString().trim();
+    const usuarioEmailQuery = (req.query.usuarioEmail || "").toString().trim();
+
+    const usuarioEmail = headerUser || usuarioEmailQuery;
+
     const limitRaw = Number(req.query.limit ?? 200);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, limitRaw)) : 200;
 
     let rows = [];
 
+    // ✅ FIX: sua tabela não tem "arquivosCount". Ela tem totalArquivos/qtdXml/qtdPdf.
+    // então a gente faz alias para não quebrar o front que espera "arquivosCount".
     if (usuarioEmail) {
       const stmt = db.prepare(`
         SELECT
@@ -31,7 +34,10 @@ router.get("/", (req, res) => {
           tipo,
           dataHora,
           status,
-          arquivosCount,
+          COALESCE(totalArquivos, (COALESCE(qtdXml,0) + COALESCE(qtdPdf,0))) AS arquivosCount,
+          qtdXml,
+          qtdPdf,
+          totalArquivos,
           detalhes
         FROM historico_execucoes
         WHERE usuarioEmail = ?
@@ -50,7 +56,10 @@ router.get("/", (req, res) => {
           tipo,
           dataHora,
           status,
-          arquivosCount,
+          COALESCE(totalArquivos, (COALESCE(qtdXml,0) + COALESCE(qtdPdf,0))) AS arquivosCount,
+          qtdXml,
+          qtdPdf,
+          totalArquivos,
           detalhes
         FROM historico_execucoes
         ORDER BY id DESC
@@ -59,47 +68,69 @@ router.get("/", (req, res) => {
       rows = stmt.all(limit);
     }
 
-    return res.json({ success: true, items: rows });
+    // ✅ compatibilidade dupla: front antigo (ok/historico) e novo (success/items)
+    return res.json({
+      ok: true,
+      historico: rows,
+      success: true,
+      items: rows,
+    });
   } catch (err) {
     console.error("[HISTORICO] erro ao listar:", err);
-    return res.status(500).json({ success: false, error: "Erro ao listar histórico." });
+    return res.status(500).json({
+      ok: false,
+      historico: [],
+      success: false,
+      items: [],
+      error: "Erro ao listar histórico.",
+    });
   }
 });
 
 /**
  * GET /api/historico/:id
+ * (mantém compatibilidade; se tiver userEmail no header, só permite ver do próprio usuário)
  */
 router.get("/:id", (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
-      return res.status(400).json({ success: false, error: "ID inválido." });
+      return res.status(400).json({ ok: false, success: false, error: "ID inválido." });
     }
 
-    const stmt = db.prepare(`
-      SELECT
-        id,
-        usuarioEmail,
-        usuarioNome,
-        empresaId,
-        empresaNome,
-        tipo,
-        dataHora,
-        status,
-        arquivosCount,
-        detalhes
-      FROM historico_execucoes
-      WHERE id = ?
-      LIMIT 1
-    `);
+    const row = db
+      .prepare(`
+        SELECT
+          id,
+          usuarioEmail,
+          usuarioNome,
+          empresaId,
+          empresaNome,
+          tipo,
+          dataHora,
+          status,
+          COALESCE(totalArquivos, (COALESCE(qtdXml,0) + COALESCE(qtdPdf,0))) AS arquivosCount,
+          qtdXml,
+          qtdPdf,
+          totalArquivos,
+          detalhes
+        FROM historico_execucoes
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(id);
 
-    const row = stmt.get(id);
-    if (!row) return res.status(404).json({ success: false, error: "Registro não encontrado." });
+    if (!row) return res.status(404).json({ ok: false, success: false, error: "Registro não encontrado." });
 
-    return res.json({ success: true, item: row });
+    const headerUser = (req.userEmail || "").toString().trim();
+    if (headerUser && String(row.usuarioEmail || "").trim() !== headerUser) {
+      return res.status(403).json({ ok: false, success: false, error: "Acesso negado." });
+    }
+
+    return res.json({ ok: true, success: true, item: row });
   } catch (err) {
     console.error("[HISTORICO] erro ao buscar:", err);
-    return res.status(500).json({ success: false, error: "Erro ao buscar histórico." });
+    return res.status(500).json({ ok: false, success: false, error: "Erro ao buscar histórico." });
   }
 });
 

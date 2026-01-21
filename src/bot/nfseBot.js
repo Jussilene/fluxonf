@@ -6,14 +6,29 @@ import { registrarExecucao } from "../models/historico.model.js";
 
 const NFSE_PORTAL_URL =
   process.env.NFSE_PORTAL_URL ||
-  "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional";
+  // ✅ Mantém o link exatamente como você informou (ReturnUrl com %2F maiúsculo)
+  "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2FEmissorNacional";
 
 const isLinux = process.platform === "linux";
 
+// ✅ AJUSTE MÍNIMO #1: controlar headless via .env (NFSE_HEADLESS / NFS_HEADLESS)
+// - NFSE_HEADLESS=0 -> abre navegador
+// - NFSE_HEADLESS=1 -> headless
 async function launchNFSEBrowser() {
+  const raw = String(process.env.NFSE_HEADLESS ?? process.env.NFS_HEADLESS ?? "").trim();
+
+  let headless;
+  if (raw === "0" || raw.toLowerCase() === "false") headless = false;
+  else if (raw === "1" || raw.toLowerCase() === "true") headless = true;
+  else headless = isLinux ? true : false;
+
+  console.log(
+    `[BOT] Browser launch: headless=${headless} (NFSE_HEADLESS=${process.env.NFSE_HEADLESS || ""} | NFS_HEADLESS=${process.env.NFS_HEADLESS || ""})`
+  );
+
   return await chromium.launch({
-    headless: isLinux ? true : false,
-    slowMo: isLinux ? 0 : 150,
+    headless,
+    slowMo: headless ? 0 : 150,
     args: isLinux
       ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
       : [],
@@ -242,7 +257,9 @@ async function isRowCanceladaBySituacaoIdx(rowHandle, situacaoIdx) {
 
     // regra de cancelada:
     const isCancelled =
-      (norm.includes("CANCELAD") || norm.includes("NFS-E CANCELAD") || norm.includes("NFSE CANCELAD")) &&
+      (norm.includes("CANCELAD") ||
+        norm.includes("NFS-E CANCELAD") ||
+        norm.includes("NFSE CANCELAD")) &&
       !norm.includes("CANCELAR");
 
     return {
@@ -310,14 +327,7 @@ async function baixarPdfPorRequest({ context, page, urlPdf, destinoPdf, log }) {
   return true;
 }
 
-async function baixarPdfRobusto({
-  context,
-  page,
-  clickPdfOption,
-  destinoPdf,
-  log,
-  pdfLinkHandle,
-}) {
+async function baixarPdfRobusto({ context, page, clickPdfOption, destinoPdf, log, pdfLinkHandle }) {
   fs.mkdirSync(path.dirname(destinoPdf), { recursive: true });
 
   const downloadPromise = page.waitForEvent("download", { timeout: 15000 }).catch(() => null);
@@ -754,6 +764,10 @@ async function runManualDownloadSimulado(params = {}) {
     empresaNome,
     modoExecucao,
     jobDir,
+
+    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    usuarioEmail,
+    usuarioNome,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
@@ -777,6 +791,10 @@ async function runManualDownloadSimulado(params = {}) {
 
   try {
     registrarExecucao({
+      // ✅ AJUSTE: salvar usuário no histórico
+      usuarioEmail: usuarioEmail || null,
+      usuarioNome: usuarioNome || null,
+
       empresaId: empresaId || null,
       empresaNome: empresaNome || null,
       tipo: modoExecucao || "manual",
@@ -812,6 +830,10 @@ async function runManualDownloadPortal(params = {}) {
     empresaNome,
     modoExecucao,
     jobDir,
+
+    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    usuarioEmail,
+    usuarioNome,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
@@ -867,8 +889,28 @@ async function runManualDownloadPortal(params = {}) {
       page.waitForTimeout(15000),
     ]).catch(() => {});
 
+    // ✅ AJUSTE MÍNIMO #2: se ainda estiver no Login, salva evidências e aborta (pra não gerar ZIP vazio)
     if (page.url().includes("/Login")) {
-      pushLog("[BOT] (Alerta) Ainda na tela de login. Pode ter captcha/seleção extra.");
+      pushLog("[BOT] (Alerta) Ainda na tela de login. Vou salvar debug e abortar.");
+
+      try {
+        const evidDir = path.join(rootJobDir, "_debug");
+        ensureDir(evidDir);
+
+        const png = path.join(evidDir, `${tipoNota}-still-login.png`);
+        const html = path.join(evidDir, `${tipoNota}-still-login.html`);
+
+        await page.screenshot({ path: png, fullPage: true }).catch(() => {});
+        const content = await page.content().catch(() => "");
+        fs.writeFileSync(html, content || "", "utf8");
+
+        pushLog(`[BOT] Debug salvo: ${png}`);
+        pushLog(`[BOT] Debug salvo: ${html}`);
+      } catch {}
+
+      throw new Error(
+        "Não autenticou no portal (permaneceu em /Login). Verifique o print/HTML em _debug."
+      );
     } else {
       pushLog("[BOT] Login OK (URL mudou).");
     }
@@ -877,12 +919,7 @@ async function runManualDownloadPortal(params = {}) {
     await navigateToTipo(page, tipoNota, pushLog);
 
     // 4) Filtro de data
-    const { usarFiltroNaTabela } = await applyDateFilterIfExists(
-      page,
-      dataInicial,
-      dataFinal,
-      pushLog
-    );
+    const { usarFiltroNaTabela } = await applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog);
 
     // ✅ Situação/Status:
     // - canceladas: usado para INCLUIR somente canceladas
@@ -921,7 +958,9 @@ async function runManualDownloadPortal(params = {}) {
       pushLog("[BOT] Nenhuma nota encontrada (Nenhum registro encontrado).");
       pushLog(`[BOT] Página atual validada: ${page.url()}`);
     } else {
-      await page.waitForSelector("table tbody tr", { timeout: 10000 });
+      // ✅ AJUSTE MÍNIMO #3: aumentar timeout da tabela
+      await page.waitForSelector("table tbody tr", { timeout: 30000 });
+
       const rowHandles = await page.$$("table tbody tr");
       const rowCount = rowHandles.length;
 
@@ -1084,7 +1123,6 @@ async function runManualDownloadPortal(params = {}) {
                     });
 
                     if (ok) {
-                      // ✅ aqui a pasta também já foi criada pelo mkdirSync do baixarPdfRobusto
                       arquivoIndexRef.value += 1;
                       pushLog(`[BOT] PDF registrado como arquivo #${arquivoIndexRef.value}.`);
                     }
@@ -1116,6 +1154,10 @@ async function runManualDownloadPortal(params = {}) {
 
     try {
       registrarExecucao({
+        // ✅ AJUSTE: salvar usuário no histórico
+        usuarioEmail: usuarioEmail || null,
+        usuarioNome: usuarioNome || null,
+
         empresaId: empresaId || null,
         empresaNome: empresaNome || null,
         tipo: modoExecucao || "manual",
@@ -1160,6 +1202,10 @@ export async function runLoteDownload(empresas = [], options = {}) {
     dataFinal,
     pastaDestino,
     processarTipos,
+
+    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    usuarioEmail,
+    usuarioNome,
   } = options || {};
 
   const { logs, pushLog } = createLogger(onLog);
@@ -1219,6 +1265,10 @@ export async function runLoteDownload(empresas = [], options = {}) {
           modoExecucao: "lote",
           onLog: (msg) => pushLog(msg),
           jobDir: empresaDir,
+
+          // ✅ AJUSTE: repassa usuário para histórico
+          usuarioEmail: usuarioEmail || null,
+          usuarioNome: usuarioNome || null,
         });
       } else {
         await runManualDownloadSimulado({
@@ -1233,6 +1283,10 @@ export async function runLoteDownload(empresas = [], options = {}) {
           modoExecucao: "lote",
           onLog: (msg) => pushLog(msg),
           jobDir: empresaDir,
+
+          // ✅ AJUSTE: repassa usuário para histórico
+          usuarioEmail: usuarioEmail || null,
+          usuarioNome: usuarioNome || null,
         });
       }
     }

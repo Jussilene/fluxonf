@@ -25,10 +25,20 @@ function getProviderName() {
   return "portal";
 }
 
-function findEmpresa(empresaId) {
+// ✅ AJUSTE MÍNIMO: agora busca empresa por TENANT (usuarioEmail)
+function findEmpresa(empresaId, usuarioEmail) {
   const idNum = Number(empresaId);
   if (!Number.isFinite(idNum)) return null;
-  return getEmpresaEmissaoById(idNum);
+
+  const email = String(usuarioEmail || "").trim();
+
+  try {
+    // compat: store novo (id, userEmail)
+    return getEmpresaEmissaoById(idNum, email);
+  } catch {
+    // compat: store antigo (id)
+    return getEmpresaEmissaoById(idNum);
+  }
 }
 
 function getEmpresaCertConfig(empresa) {
@@ -71,7 +81,7 @@ export async function emitirNfse(payload) {
   const onLog = (m) => logs.push(m);
 
   const provider = getProviderName();
-  const empresa = findEmpresa(payload.empresaId);
+  const empresa = findEmpresa(payload.empresaId, payload.usuarioEmail);
 
   if (!empresa) {
     throw new Error("Empresa não encontrada no cadastro da aba Emissão (store separado).");
@@ -83,7 +93,7 @@ export async function emitirNfse(payload) {
     onLog("Modo emissão: API_NACIONAL (DPS → POST /nfse).");
 
     const certConfig = getEmpresaCertConfig(empresa);
-    if (certConfig) onLog("Certificado: usando PFX vinculado à empresa (aba Emissão).");
+    if (certConfig) onLog(`Certificado: usando PFX vinculado à empresa (aba Emissão).`);
     else onLog("⚠️ Certificado da empresa não encontrado. Usando .env (NFSE_CERT_PFX_PATH).");
 
     r = await emitirNfseNacional({ payload, empresa, certConfig, onLog });
@@ -145,7 +155,7 @@ export async function consultarNfsePorChave({ chaveAcesso, usuarioEmail, empresa
     };
   }
 
-  const empresa = empresaId ? findEmpresa(empresaId) : null;
+  const empresa = empresaId ? findEmpresa(empresaId, usuarioEmail) : null;
   const certConfig = empresa ? getEmpresaCertConfig(empresa) : null;
 
   if (certConfig) onLog("Certificado: usando PFX vinculado à empresa (consulta).");
@@ -176,7 +186,7 @@ export async function cancelarNfsePorChave({ usuarioEmail, empresaId, chaveAcess
     return { status: "erro", mensagem, logs };
   }
 
-  const empresa = empresaId ? findEmpresa(empresaId) : null;
+  const empresa = empresaId ? findEmpresa(empresaId, usuarioEmail) : null;
   const certConfig = empresa ? getEmpresaCertConfig(empresa) : null;
 
   if (certConfig) onLog("Certificado: usando PFX vinculado à empresa (cancelamento).");

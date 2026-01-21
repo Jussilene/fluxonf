@@ -38,33 +38,59 @@ function readDb() {
 }
 
 function writeDb(data) {
+  ensureDbFile();
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
 }
 
-export function listarEmpresasEmissao() {
-  return readDb().empresas;
+function normEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
-export function getEmpresaEmissaoById(id) {
+// ✅ Agora LISTA por usuário (tenant)
+export function listarEmpresasEmissao(userEmail) {
+  const db = readDb();
+  const owner = normEmail(userEmail);
+  if (!owner) return [];
+  return db.empresas.filter((e) => normEmail(e.userEmail) === owner);
+}
+
+// ✅ busca por id, mas só dentro do dono
+export function getEmpresaEmissaoById(id, userEmail) {
   const db = readDb();
   const idNum = Number(id);
   if (!Number.isFinite(idNum)) return null;
 
-  // ✅ 100% separado: só busca no store de emissão
-  return db.empresas.find((e) => Number(e.id) === idNum) || null;
+  const owner = normEmail(userEmail);
+  if (!owner) return null;
+
+  return (
+    db.empresas.find((e) => Number(e.id) === idNum && normEmail(e.userEmail) === owner) || null
+  );
 }
 
-export function adicionarEmpresaEmissao({ nome, cnpj, municipio }) {
+// ✅ agora grava com userEmail (dono)
+export function adicionarEmpresaEmissao({ nome, cnpj, municipio, userEmail }) {
   const db = readDb();
+  const owner = normEmail(userEmail);
+  if (!owner) throw new Error("userEmail é obrigatório (multi-tenant).");
+
   const cleanCnpj = (cnpj || "").toString().replace(/\D/g, "");
   const now = new Date().toISOString();
 
   const nova = {
     id: db.lastId + 1,
+    userEmail: owner, // ✅ dono
     nome: (nome || "").trim(),
     cnpj: cleanCnpj,
     municipio: (municipio || "").toString().trim(),
     ativo: true,
+
+    // credenciais (se você quiser usar depois)
+    loginPortal: "",
+    senhaPortal: "",
+
+    // município IBGE (se preencher depois)
+    municipioIbge: "",
 
     // certificado vinculado à empresa de emissão
     certPfxPath: "",
@@ -80,13 +106,16 @@ export function adicionarEmpresaEmissao({ nome, cnpj, municipio }) {
   return nova;
 }
 
-export function atualizarEmpresaEmissaoCertificado(id, { certPfxPath, certPfxPassphrase }) {
+// ✅ atualizar certificado só do dono
+export function atualizarEmpresaEmissaoCertificado(id, userEmail, { certPfxPath, certPfxPassphrase }) {
   const db = readDb();
   const idNum = Number(id);
   if (!Number.isFinite(idNum)) return false;
 
-  // ✅ 100% separado: se não existe no store de emissão, NÃO importa do lote
-  const emp = db.empresas.find((e) => Number(e.id) === idNum);
+  const owner = normEmail(userEmail);
+  if (!owner) return false;
+
+  const emp = db.empresas.find((e) => Number(e.id) === idNum && normEmail(e.userEmail) === owner);
   if (!emp) return false;
 
   emp.certPfxPath = String(certPfxPath || "").trim();
@@ -97,14 +126,24 @@ export function atualizarEmpresaEmissaoCertificado(id, { certPfxPath, certPfxPas
   return true;
 }
 
-export function removerEmpresaEmissao(id) {
+// ✅ remover só do dono
+export function removerEmpresaEmissao(id, userEmail) {
   const db = readDb();
   const idNum = Number(id);
   if (!Number.isFinite(idNum)) return false;
 
-  const before = db.empresas.length;
-  db.empresas = db.empresas.filter((e) => Number(e.id) !== idNum);
-  writeDb(db);
+  const owner = normEmail(userEmail);
+  if (!owner) return false;
 
+  const before = db.empresas.length;
+
+  db.empresas = db.empresas.filter((e) => {
+    const sameId = Number(e.id) === idNum;
+    const sameOwner = normEmail(e.userEmail) === owner;
+    // remove apenas se for o mesmo id e do mesmo dono
+    return !(sameId && sameOwner);
+  });
+
+  writeDb(db);
   return db.empresas.length !== before;
 }

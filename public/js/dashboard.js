@@ -22,6 +22,14 @@ try {
   currentUser = { email: String(rawUser) };
 }
 
+// ✅ headers padrão (multi-tenant)
+function apiHeaders(extra = {}) {
+  const email = (currentUser?.email || "").toString().trim();
+  const h = { ...extra };
+  if (email) h["x-user-email"] = email;
+  return h;
+}
+
 const userNameDisplay = document.getElementById("userNameDisplay");
 const userAvatar = document.getElementById("userAvatar");
 
@@ -513,7 +521,7 @@ if (iniciarDownloadBtn) {
     try {
       const res = await fetch("/api/nf/manual", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(config),
       });
 
@@ -597,7 +605,7 @@ if (baixarTudoBtn) {
     try {
       const res = await fetch("/api/nf/lote", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(config),
       });
 
@@ -678,7 +686,7 @@ function renderEmpresas() {
 
     const tr = document.createElement("tr");
     tr.className = "border-t border-slate-100 hover:bg-sky-50 cursor-pointer";
-    tr.dataset.id = emp.id;
+    tr.dataset.id = String(emp.id || "");
 
     tr.innerHTML = `
       <td class="px-3 py-2 text-slate-600">${emp.id || "—"}</td>
@@ -686,16 +694,29 @@ function renderEmpresas() {
       <td class="px-3 py-2 text-slate-600">${emp.cnpj || "—"}</td>
     `;
 
-    tr.addEventListener("click", () => {
-      empresaSelecionadaId = emp.id;
-      Array.from(empresasTableBody.children).forEach((row) => {
-        row.classList.remove("bg-sky-100");
-      });
-      tr.classList.add("bg-sky-100");
-      if (removerEmpresaBtn) removerEmpresaBtn.disabled = false;
+    empresasTableBody.appendChild(tr);
+  });
+}
+
+// ✅ Delegação de evento: seleção sempre funciona (mesmo após re-render)
+// ✅ Patch: ignora clique em linha sem dataset.id
+if (empresasTableBody && empresasTableBody.dataset._bound !== "1") {
+  empresasTableBody.dataset._bound = "1";
+  empresasTableBody.addEventListener("click", (ev) => {
+    const tr = ev.target.closest("tr");
+    if (!tr || !empresasTableBody.contains(tr)) return;
+
+    const id = (tr.dataset.id || "").trim();
+    if (!id || id === "—") return;
+
+    empresaSelecionadaId = id;
+
+    Array.from(empresasTableBody.querySelectorAll("tr")).forEach((row) => {
+      row.classList.remove("bg-sky-100");
     });
 
-    empresasTableBody.appendChild(tr);
+    tr.classList.add("bg-sky-100");
+    if (removerEmpresaBtn) removerEmpresaBtn.disabled = false;
   });
 }
 
@@ -703,7 +724,10 @@ async function loadEmpresasFromAPI() {
   if (!empresasTableBody) return;
 
   try {
-    const res = await fetch("/api/empresas");
+    const res = await fetch("/api/empresas", {
+      headers: apiHeaders(),
+    });
+
     if (!res.ok) {
       console.error("Erro ao carregar empresas:", res.status, res.statusText);
       return;
@@ -745,27 +769,32 @@ if (salvarEmpresaBtn) {
     try {
       const res = await fetch("/api/empresas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ nome, cnpj, senhaPortal }),
       });
 
       if (!res.ok) {
+        const txt = await res.text().catch(() => "");
         if (feedback) {
           feedback.textContent = "Erro ao salvar empresa no servidor.";
           feedback.classList.remove("hidden");
           feedback.classList.remove("text-emerald-600");
           feedback.classList.add("text-rose-600");
         }
+        console.error("Salvar empresa falhou:", res.status, res.statusText, txt);
         return;
       }
 
-      const json = await res.json();
-
-      // ✅ ÚNICA CORREÇÃO: aceitar resposta { ok:true, empresa:{...} } OU empresa direto
+      const json = await res.json().catch(() => ({}));
       const empresaCriada = (json && json.empresa) ? json.empresa : json;
 
-      empresas.push(empresaCriada);
-      renderEmpresas();
+      // ✅ Patch: se não vier id, recarrega do backend (evita UI quebrar)
+      if (!empresaCriada || empresaCriada.id == null) {
+        await loadEmpresasFromAPI();
+      } else {
+        empresas.push(empresaCriada);
+        renderEmpresas();
+      }
 
       document.getElementById("nomeEmpresa").value = "";
       document.getElementById("cnpjEmpresa").value = "";
@@ -791,28 +820,41 @@ if (salvarEmpresaBtn) {
 
 if (removerEmpresaBtn) {
   removerEmpresaBtn.addEventListener("click", async () => {
-    if (!empresaSelecionadaId) return;
+    if (!empresaSelecionadaId) {
+      // ✅ Patch: feedback claro
+      addLog(logsLote, "[AVISO] Selecione uma empresa na tabela antes de remover.");
+      return;
+    }
+
+    // opcional: confirmação (se você não quiser, pode remover esse bloco)
+    if (!confirm("Deseja remover a empresa selecionada?")) return;
 
     try {
-      const res = await fetch(`/api/empresas/${empresaSelecionadaId}`, {
+      const res = await fetch(`/api/empresas/${encodeURIComponent(empresaSelecionadaId)}`, {
         method: "DELETE",
+        headers: apiHeaders(),
       });
 
       if (!res.ok) {
-        console.error("Erro ao remover empresa:", res.status, res.statusText);
+        const txt = await res.text().catch(() => "");
+        console.error("Erro ao remover empresa:", res.status, res.statusText, txt);
+        addLog(
+          logsLote,
+          `[ERRO] Falha ao remover (HTTP ${res.status}). Pode ser empresa de outro usuário (multi-tenant).`
+        );
+        if (txt) addLog(logsLote, txt);
         return;
       }
 
-      empresas = empresas.filter((e) => {
-        const id = e?.id ?? e?.empresaId ?? e?._id ?? e?.cnpj ?? "";
-        return String(id) !== String(empresaSelecionadaId);
-      });
-
+      // ✅ Patch: sempre recarrega do backend (garante sincronismo real)
       empresaSelecionadaId = null;
       removerEmpresaBtn.disabled = true;
-      renderEmpresas();
+
+      await loadEmpresasFromAPI();
+      addLog(logsLote, "[OK] Empresa removida com sucesso.");
     } catch (err) {
       console.error("Erro ao remover empresa:", err);
+      addLog(logsLote, "[ERRO] Erro inesperado ao remover empresa.");
     }
   });
 }

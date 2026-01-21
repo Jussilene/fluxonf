@@ -16,6 +16,26 @@ function formatDateTimeBr(isoString) {
   return `${dia}/${mes}/${ano} ${hora}:${min}`;
 }
 
+// ✅ headers padrão (multi-tenant) — igual lógica do dashboard.js, mas local ao histórico
+function historicoApiHeaders(extra = {}) {
+  let currentUser = {};
+  try {
+    const rawUser = localStorage.getItem("nfseUser");
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      currentUser = parsed && typeof parsed === "object" ? parsed : { email: String(rawUser) };
+    }
+  } catch {
+    const rawUser = localStorage.getItem("nfseUser");
+    currentUser = { email: String(rawUser || "") };
+  }
+
+  const email = (currentUser?.email || "").toString().trim();
+  const h = { ...extra };
+  if (email) h["x-user-email"] = email;
+  return h;
+}
+
 function renderHistoricoTabela(lista) {
   const tbody = document.getElementById("historicoTableBody");
   const emptyState = document.getElementById("historicoEmptyState");
@@ -35,6 +55,7 @@ function renderHistoricoTabela(lista) {
     const tr = document.createElement("tr");
 
     const dataHora = formatDateTimeBr(item.dataHora);
+
     const empresa =
       item.empresaNome ||
       item.empresaId ||
@@ -47,7 +68,10 @@ function renderHistoricoTabela(lista) {
         ? "Manual / Único"
         : item.tipo || "N/D";
 
-    const total = item.totalArquivos ?? 0;
+    // ✅ compatibilidade: backend pode mandar totalArquivos OU arquivosCount
+    const total =
+      (item.totalArquivos ?? item.arquivosCount ?? 0);
+
     const status = (item.status || "").toLowerCase();
 
     let statusLabel = item.status || "N/D";
@@ -74,10 +98,7 @@ function renderHistoricoTabela(lista) {
       <td class="px-3 py-2">
         <span class="${statusClasses}">${statusLabel}</span>
       </td>
-      <td class="px-3 py-2 text-slate-600" title="${detalhes.replace(
-        /"/g,
-        "&quot;"
-      )}">
+      <td class="px-3 py-2 text-slate-600" title="${detalhes.replace(/"/g, "&quot;")}">
         ${detalhes ? detalhes : "-"}
       </td>
     `;
@@ -91,16 +112,29 @@ async function carregarHistoricoExecucoes() {
   if (btn) btn.disabled = true;
 
   try {
-    const resp = await fetch("/api/historico");
-    const data = await resp.json();
+    const resp = await fetch("/api/historico", {
+      headers: historicoApiHeaders(),
+    });
 
-    if (!data.ok) {
+    const data = await resp.json().catch(() => ({}));
+
+    // ✅ compatibilidade: backend pode responder {success, items} OU {ok, historico}
+    const okFlag =
+      (data && data.ok === true) ||
+      (data && data.success === true);
+
+    if (!okFlag) {
       console.error("Erro ao buscar histórico:", data);
       renderHistoricoTabela([]);
       return;
     }
 
-    renderHistoricoTabela(data.historico || []);
+    const lista =
+      (Array.isArray(data.historico) && data.historico) ||
+      (Array.isArray(data.items) && data.items) ||
+      [];
+
+    renderHistoricoTabela(lista);
   } catch (err) {
     console.error("Erro ao buscar histórico:", err);
     renderHistoricoTabela([]);

@@ -2,6 +2,10 @@
 import db from "../db/sqlite.js";
 
 export function registrarExecucao({
+  // ✅ NOVO: multi-tenant (se vier, salva; se não vier, mantém null)
+  usuarioEmail,
+  usuarioNome,
+
   empresaId,
   empresaNome,
   tipo,
@@ -14,6 +18,8 @@ export function registrarExecucao({
 }) {
   const stmt = db.prepare(`
     INSERT INTO historico_execucoes (
+      usuarioEmail,
+      usuarioNome,
       empresaId,
       empresaNome,
       tipo,
@@ -25,6 +31,8 @@ export function registrarExecucao({
       erros,
       detalhes
     ) VALUES (
+      @usuarioEmail,
+      @usuarioNome,
       @empresaId,
       @empresaNome,
       @tipo,
@@ -41,6 +49,9 @@ export function registrarExecucao({
   const dataHora = new Date().toISOString();
 
   stmt.run({
+    usuarioEmail: usuarioEmail ? String(usuarioEmail).trim() : null,
+    usuarioNome: usuarioNome ? String(usuarioNome).trim() : null,
+
     empresaId: empresaId || null,
     empresaNome: empresaNome || null,
     tipo: tipo || "manual",

@@ -10,10 +10,10 @@ import { fileURLToPath } from "url";
 
 import { runManualDownload, runLoteDownload } from "./bot/nfseBot.js";
 
-// ✅ usa o store único (não duplica banco no server)
+// ✅ store único (JSON), agora com suporte a userEmail
 import { listarEmpresas, adicionarEmpresa, removerEmpresa } from "./utils/empresasStore.js";
 
-// ✅ HISTÓRICO está em src/emissao/routes/
+// ✅ HISTÓRICO
 import historicoRoutes from "./emissao/routes/historico.routes.js";
 
 // ✅ rotas da emissão
@@ -37,9 +37,25 @@ ensureNfseEmissaoTables();
 // Middlewares
 // ---------------------------
 app.use(cors());
-app.use(express.json({ limit: "25mb" })); // ✅ necessário pro base64 do PFX
-app.use(express.urlencoded({ extended: true, limit: "25mb" })); // ✅ idem
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
+
+// ✅ Middleware multi-tenant (pega usuário do header)
+// - Front envia: x-user-email: currentUser.email
+// - Mantém compatibilidade com body/query (se vier)
+app.use((req, _res, next) => {
+  const h = req.headers["x-user-email"];
+  const headerEmail = (Array.isArray(h) ? h[0] : h) || "";
+
+  const bodyEmail = req.body?.usuarioEmail || req.body?.userEmail || "";
+  const queryEmail = req.query?.usuarioEmail || req.query?.userEmail || "";
+
+  // prioridade: header > body > query
+  req.userEmail = String(headerEmail || bodyEmail || queryEmail || "").trim();
+
+  next();
+});
 
 // ---------------------------
 // Pasta pública de ZIPs
@@ -50,18 +66,17 @@ if (!fs.existsSync(ZIP_DIR)) {
 }
 
 // ---------------------------
-// ✅ Empresas (store único em JSON: data/empresas.json)
+// ✅ Empresas (multi-tenant via userEmail)
 // ---------------------------
-
-// GET /api/empresas -> retorna padrão { empresas: [...] } (e mantém compatibilidade)
 app.get("/api/empresas", (req, res) => {
-  const empresas = listarEmpresas();
+  const userEmail = req.userEmail || "";
+  const empresas = listarEmpresas(userEmail);
   return res.json({ ok: true, empresas });
 });
 
-// POST /api/empresas
 app.post("/api/empresas", (req, res) => {
   const { nome, cnpj, loginPortal, senhaPortal, municipio } = req.body || {};
+  const userEmail = req.userEmail || "";
 
   if (!nome || !cnpj) {
     return res.status(400).json({ ok: false, error: "Nome e CNPJ são obrigatórios." });
@@ -73,15 +88,17 @@ app.post("/api/empresas", (req, res) => {
     loginPortal,
     senhaPortal: senhaPortal || "",
     municipio: municipio || "",
+    userEmail,
   });
 
   return res.status(201).json({ ok: true, empresa: nova });
 });
 
-// DELETE /api/empresas/:id
 app.delete("/api/empresas/:id", (req, res) => {
   const { id } = req.params;
-  const ok = removerEmpresa(id);
+  const userEmail = req.userEmail || "";
+
+  const ok = removerEmpresa(id, userEmail);
 
   if (!ok) {
     return res.status(404).json({ ok: false, error: "Empresa não encontrada." });
@@ -144,13 +161,12 @@ function normalizeTipos(processarTipos, tipoNotaFallback) {
 
   if (clean.length) return Array.from(new Set(clean));
 
-  // fallback (compatível com UI antiga de radio)
   const t = (tipoNotaFallback || "emitidas").toLowerCase();
   return allow.has(t) ? [t] : ["emitidas"];
 }
 
 // ---------------------------
-// ROBÔ – MANUAL
+// ROBÔ – MANUAL (multi-tenant: usa req.userEmail como "dono")
 // ---------------------------
 app.post("/api/nf/manual", async (req, res) => {
   try {
@@ -165,6 +181,8 @@ app.post("/api/nf/manual", async (req, res) => {
       ...req.body,
       baixarXml,
       baixarPdf,
+      // ✅ garante que histórico/execuções usem o usuário do header se o front não enviar
+      usuarioEmail: req.body?.usuarioEmail || req.userEmail || "",
       onLog: (msg) => console.log(msg),
     };
 
@@ -212,19 +230,19 @@ app.post("/api/nf/manual", async (req, res) => {
 });
 
 // ---------------------------
-// ROBÔ – LOTE
+// ROBÔ – LOTE (agora lista empresas do próprio usuário)
 // ---------------------------
 app.post("/api/nf/lote", async (req, res) => {
   try {
     if (!assertPeriodo(req, res)) return;
 
-    // ✅ pega do store único
-    const empresas = listarEmpresas();
+    const userEmail = req.userEmail || "";
+    const empresas = listarEmpresas(userEmail);
 
     if (!empresas || empresas.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "Nenhuma empresa cadastrada para execução em lote.",
+        error: "Nenhuma empresa cadastrada para execução em lote (para este usuário).",
       });
     }
 
@@ -237,6 +255,7 @@ app.post("/api/nf/lote", async (req, res) => {
       ...req.body,
       baixarXml,
       baixarPdf,
+      usuarioEmail: req.body?.usuarioEmail || userEmail || "",
       onLog: (msg) => console.log(msg),
       processarTipos: tipos,
     });
