@@ -33,6 +33,9 @@ import { getSessionUser } from "./auth/session.store.js";
 // ✅ NOVO (ESQUECI SENHA) — rotas
 import passwordResetRoutes from "./routes/passwordReset.routes.js";
 
+// ✅ NOVO (HOTMART WEBHOOK) — rotas (APENAS ESTA)
+import hotmartWebhookRoutes from "./routes/webhooks.hotmart.routes.js";
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -84,6 +87,10 @@ app.use((req, _res, next) => {
 // ---------------------------
 app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
+
+// ✅ NOVO (HOTMART WEBHOOK)
+// - registra /webhooks/hotmart
+app.use("/webhooks", hotmartWebhookRoutes);
 
 // ✅ NOVO (ESQUECI SENHA)
 // - registra /auth/forgot-password e /auth/reset-password

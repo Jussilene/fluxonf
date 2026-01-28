@@ -221,7 +221,7 @@ async function fetchMeRole() {
   try {
     const res = await fetch("/auth/me", { credentials: "include" });
     if (!res.ok) return null;
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     return data?.user || null;
   } catch {
     return null;
@@ -381,10 +381,7 @@ async function openSettingsModal() {
 
   // close
   const closeBtn = settingsModalEl.querySelector("#settingsCloseBtn");
-  if (closeBtn)
-    closeBtn.addEventListener("click", () =>
-      settingsModalEl.classList.add("hidden")
-    );
+  if (closeBtn) closeBtn.addEventListener("click", () => settingsModalEl.classList.add("hidden"));
 
   // (mantém clique fora para fechar)
   settingsModalEl.addEventListener("click", (e) => {
@@ -396,25 +393,21 @@ async function openSettingsModal() {
   tabBtns.forEach((b) => {
     b.addEventListener("click", () => {
       const tab = b.getAttribute("data-tab");
-      settingsModalEl
-        .querySelectorAll(".settings-panel")
-        .forEach((p) => p.classList.add("hidden"));
+      settingsModalEl.querySelectorAll(".settings-panel").forEach((p) => p.classList.add("hidden"));
       const panel = settingsModalEl.querySelector(`#settingsTab-${tab}`);
       if (panel) panel.classList.remove("hidden");
     });
   });
 
-  // save me
+  // ✅✅✅ AJUSTE PRINCIPAL: salvar perfil/senha SEM fallback fake/local para senha
   const saveMeBtn = settingsModalEl.querySelector("#saveMeBtn");
   if (saveMeBtn) {
     saveMeBtn.addEventListener("click", async () => {
       const msg = settingsModalEl.querySelector("#saveMeMsg");
       if (msg) msg.textContent = "Salvando...";
 
-      const name =
-        settingsModalEl.querySelector("#meName")?.value?.trim() || "";
-      const email =
-        settingsModalEl.querySelector("#meEmail")?.value?.trim() || "";
+      const name = settingsModalEl.querySelector("#meName")?.value?.trim() || "";
+      const email = settingsModalEl.querySelector("#meEmail")?.value?.trim() || "";
       const pass = settingsModalEl.querySelector("#mePass")?.value || "";
       const pass2 = settingsModalEl.querySelector("#mePass2")?.value || "";
 
@@ -428,60 +421,76 @@ async function openSettingsModal() {
         return;
       }
 
-      // tenta backend (auth real). Se não estiver usando, só atualiza localStorage.
+      // 1) Atualiza perfil no BACKEND
       try {
-        const res = await fetch("/auth/me", { credentials: "include" });
-        if (res.ok) {
-          const up = await fetch("/auth/update-profile", {
+        const up = await fetch("/auth/update-profile", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email }),
+        });
+
+        const upJson = await up.json().catch(() => ({}));
+
+        if (!up.ok || upJson?.ok === false) {
+          if (msg) msg.textContent = upJson?.message || upJson?.error || "Erro ao salvar perfil.";
+          return;
+        }
+      } catch (e) {
+        if (msg) msg.textContent = "Falha ao salvar no servidor (update-profile).";
+        return;
+      }
+
+      // 2) Troca senha no BACKEND (se preenchida)
+      let changedPassword = false;
+      if (pass) {
+        try {
+          const pw = await fetch("/auth/change-password", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, email }),
+            body: JSON.stringify({ newPassword: pass }),
           });
 
-          if (!up.ok) {
-            const t = await up.text().catch(() => "");
-            if (msg) msg.textContent = t || "Erro ao salvar perfil.";
+          const pwJson = await pw.json().catch(() => ({}));
+
+          if (!pw.ok || pwJson?.ok === false) {
+            if (msg) msg.textContent = pwJson?.message || pwJson?.error || "Erro ao alterar senha.";
             return;
           }
 
-          if (pass) {
-            const pw = await fetch("/auth/change-password", {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ newPassword: pass }),
-            });
-            if (!pw.ok) {
-              const t = await pw.text().catch(() => "");
-              if (msg) msg.textContent = t || "Erro ao alterar senha.";
-              return;
-            }
-          }
-
-          currentUser.name = name;
-          currentUser.displayName = name;
-          currentUser.email = email;
-          localStorage.setItem("nfseUser", JSON.stringify(currentUser));
-
-          const label = document.getElementById("userMenuLabel");
-          if (label) label.textContent = name;
-
-          if (msg) msg.textContent = "Salvo com sucesso.";
+          changedPassword = true;
+        } catch (e) {
+          if (msg) msg.textContent = "Falha ao alterar senha no servidor (change-password).";
           return;
         }
-      } catch {}
+      }
 
-      // fallback local
+      // 3) Só agora atualiza localStorage (espelha o backend)
       currentUser.name = name;
       currentUser.displayName = name;
       currentUser.email = email;
-      localStorage.setItem("nfseUser", JSON.stringify(currentUser));
+      try {
+        localStorage.setItem("nfseUser", JSON.stringify(currentUser));
+      } catch {}
 
       const label = document.getElementById("userMenuLabel");
       if (label) label.textContent = name;
 
-      if (msg) msg.textContent = "Salvo (local).";
+      // limpa campos senha
+      const p1 = settingsModalEl.querySelector("#mePass");
+      const p2 = settingsModalEl.querySelector("#mePass2");
+      if (p1) p1.value = "";
+      if (p2) p2.value = "";
+
+      if (changedPassword) {
+        if (msg) msg.textContent = "Senha alterada. Faça login novamente com a nova senha...";
+        // força logout pra você testar que a senha nova realmente funciona
+        setTimeout(() => doLogout(), 900);
+        return;
+      }
+
+      if (msg) msg.textContent = "Salvo com sucesso.";
     });
   }
 
@@ -509,7 +518,7 @@ async function adminLoadUsersIntoModal() {
       return;
     }
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     const list = Array.isArray(data?.users) ? data.users : [];
     const totals = data?.totals || null;
 
@@ -550,10 +559,8 @@ function wireAdminActions() {
 
   if (createBtn) {
     createBtn.addEventListener("click", async () => {
-      const name =
-        settingsModalEl.querySelector("#newUserName")?.value?.trim() || "";
-      const email =
-        settingsModalEl.querySelector("#newUserEmail")?.value?.trim() || "";
+      const name = settingsModalEl.querySelector("#newUserName")?.value?.trim() || "";
+      const email = settingsModalEl.querySelector("#newUserEmail")?.value?.trim() || "";
       const pass = settingsModalEl.querySelector("#newUserPass")?.value || "";
       const role = settingsModalEl.querySelector("#newUserRole")?.value || "USER";
 
@@ -605,13 +612,10 @@ function wireAdminActions() {
 
       if (action === "toggle") {
         try {
-          const res = await fetch(
-            `/admin/users/${encodeURIComponent(id)}/toggle`,
-            {
-              method: "POST",
-              credentials: "include",
-            }
-          );
+          const res = await fetch(`/admin/users/${encodeURIComponent(id)}/toggle`, {
+            method: "POST",
+            credentials: "include",
+          });
           if (!res.ok) return;
           await adminLoadUsersIntoModal();
         } catch {}
@@ -622,15 +626,12 @@ function wireAdminActions() {
         if (!newPass) return;
 
         try {
-          const res = await fetch(
-            `/admin/users/${encodeURIComponent(id)}/reset-password`,
-            {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ newPassword: newPass }),
-            }
-          );
+          const res = await fetch(`/admin/users/${encodeURIComponent(id)}/reset-password`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ newPassword: newPass }),
+          });
           if (!res.ok) return;
           alert("Senha resetada com sucesso.");
         } catch {}
@@ -696,6 +697,35 @@ if (themeToggleBtn) {
   });
 }
 
+// =======================================================
+// ✅ OCULTAR ABA "EMISSÃO" NO SERVIDOR (MOSTRA SÓ LOCALHOST)
+// - Mantém visível em: localhost / 127.0.0.1 / ::1
+// - Remove botão + painel em produção
+// =======================================================
+function isLocalhostHost() {
+  const h = String(window.location.hostname || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+(function hideEmissaoTabInProd() {
+  if (isLocalhostHost()) return;
+
+  // remove botão da aba
+  const emissaoBtn = document.querySelector('.tab-btn[data-tab="emissao"]');
+  if (emissaoBtn) emissaoBtn.remove();
+
+  // remove painel
+  const emissaoPanel = document.getElementById("tab-emissao");
+  if (emissaoPanel) emissaoPanel.remove();
+
+  // se por algum motivo a URL tinha hash/estado apontando emissao, garante download
+  // (isso evita ficar “sem tela” caso algo tente ativar emissao)
+  try {
+    const active = document.querySelector('.tab-btn.border-slate-900[data-tab="emissao"]');
+    if (active) active.classList.remove("border-slate-900");
+  } catch {}
+})();
+
 // ---------------------------
 // Tabs
 // ---------------------------
@@ -703,6 +733,9 @@ const tabButtons = document.querySelectorAll(".tab-btn");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
 function activateTab(tabName) {
+  // ✅ se alguém chamar activateTab("emissao") em produção, cai para download
+  if (tabName === "emissao" && !isLocalhostHost()) tabName = "download";
+
   tabButtons.forEach((btn) => {
     const isActive = btn.dataset.tab === tabName;
     btn.classList.toggle("border-slate-900", isActive);

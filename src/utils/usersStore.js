@@ -106,7 +106,7 @@ export async function findUserByEmail(email) {
       .prepare(`SELECT id, name, email, role, is_active FROM users WHERE email = ?`)
       .get(e);
 
-    if (user && user.is_active) return user;
+    if (user) return user;
   } catch (err) {
     // não quebra o app se sqlite tiver qualquer problema
     console.error("[usersStore] sqlite findUserByEmail error:", err?.message || err);
@@ -123,6 +123,123 @@ export async function findUserByEmail(email) {
   // 3) fallback json
   const dbJson = readUsersDb();
   return dbJson.users.find((u) => String(u.email || "").toLowerCase() === e) || null;
+}
+
+/**
+ * ✅ NOVO: Cria usuário no SQLite como "user" (não ADM).
+ * - Se já existir, retorna o existente.
+ * - Se existir e estiver inativo, pode reativar via setUserActiveByEmail.
+ *
+ * OBS: senha padrão pode vir por parâmetro, ou via env HOTMART_DEFAULT_PASSWORD.
+ */
+export async function createUser({ email, name = "", role = "user", password = "" } = {}) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e) return null;
+
+  const pw =
+    String(password || "").trim() ||
+    String(process.env.HOTMART_DEFAULT_PASSWORD || "").trim() ||
+    "123456";
+
+  // ✅ 1) SQLite (preferencial)
+  try {
+    const existing = db
+      .prepare(`SELECT id, name, email, role, is_active FROM users WHERE email = ?`)
+      .get(e);
+
+    if (existing) return existing;
+
+    const password_hash = await hashPassword(pw);
+
+    const finalName = String(name || "").trim() || "Cliente Hotmart";
+
+    const info = db
+      .prepare(
+        `INSERT INTO users (name, email, role, is_active, password_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(finalName, e, role, 1, password_hash, new Date().toISOString());
+
+    return {
+      id: info.lastInsertRowid,
+      name: finalName,
+      email: e,
+      role,
+      is_active: 1,
+    };
+  } catch (err) {
+    console.error("[usersStore] sqlite createUser error:", err?.message || err);
+  }
+
+  // 2) store existente (se houver)
+  const existingStore = await getExistingStore();
+  if (existingStore) {
+    if (typeof existingStore.createUser === "function") return existingStore.createUser({ email: e, name, role, password: pw });
+    if (typeof existingStore.addUser === "function") return existingStore.addUser({ email: e, name, role, password: pw });
+  }
+
+  // 3) fallback json
+  const dbJson = readUsersDb();
+
+  const exists = dbJson.users.find((u) => String(u.email || "").toLowerCase() === e);
+  if (exists) return exists;
+
+  const newUser = {
+    id: String(Date.now()),
+    name: String(name || "").trim() || "Cliente Hotmart",
+    email: e,
+    role,
+    is_active: 1,
+    passwordHash: hashPasswordFallback(pw),
+    createdAt: Date.now(),
+    source: "hotmart",
+  };
+
+  dbJson.users.push(newUser);
+  writeUsersDb(dbJson);
+
+  return newUser;
+}
+
+/**
+ * ✅ NOVO: Ativa/desativa usuário no SQLite (bloqueia login pelo is_active)
+ */
+export async function setUserActiveByEmail(email, active) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e) return null;
+
+  const a = active ? 1 : 0;
+
+  // ✅ 1) SQLite
+  try {
+    const user = db.prepare(`SELECT id FROM users WHERE email = ?`).get(e);
+    if (!user?.id) return null;
+
+    db.prepare(`UPDATE users SET is_active = ? WHERE email = ?`).run(a, e);
+
+    return db
+      .prepare(`SELECT id, name, email, role, is_active FROM users WHERE email = ?`)
+      .get(e);
+  } catch (err) {
+    console.error("[usersStore] sqlite setUserActiveByEmail error:", err?.message || err);
+  }
+
+  // 2) store existente (se houver)
+  const existing = await getExistingStore();
+  if (existing) {
+    if (typeof existing.setUserActiveByEmail === "function") return existing.setUserActiveByEmail(e, !!active);
+    if (typeof existing.setActiveByEmail === "function") return existing.setActiveByEmail(e, !!active);
+  }
+
+  // 3) fallback json
+  const dbJson = readUsersDb();
+  const idx = dbJson.users.findIndex((u) => String(u.email || "").toLowerCase() === e);
+  if (idx === -1) return null;
+
+  dbJson.users[idx].is_active = a;
+  writeUsersDb(dbJson);
+
+  return dbJson.users[idx];
 }
 
 /**
