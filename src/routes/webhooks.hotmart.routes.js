@@ -1,18 +1,20 @@
 // src/routes/webhooks.hotmart.routes.js
 import express from "express";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 
-// store de usuários (o seu já existente)
 import {
   findUserByEmail,
   createUser,
   setUserActiveByEmail,
 } from "../utils/usersStore.js";
 
+import { hashPassword } from "../auth/password.js";
+
 const router = express.Router();
 
 /* =========================
-   Helpers
+   Helpers Hotmart
 ========================= */
 
 function pickEmail(payload) {
@@ -27,6 +29,16 @@ function pickEmail(payload) {
     .toLowerCase();
 }
 
+function pickName(payload) {
+  return (
+    payload?.data?.buyer?.name ||
+    payload?.data?.buyer?.first_name ||
+    ""
+  )
+    .toString()
+    .trim();
+}
+
 function pickEvent(payload) {
   return (payload?.event || "")
     .toString()
@@ -34,92 +46,159 @@ function pickEvent(payload) {
     .toUpperCase();
 }
 
-function makeTempPasswordHash() {
-  // ⚠️ ideal futuramente: usar o MESMO hash do auth (bcrypt, etc)
-  const tempPassword = crypto.randomBytes(12).toString("hex");
-  const passwordHash = crypto
-    .createHash("sha256")
-    .update(tempPassword)
-    .digest("hex");
-
-  return { tempPassword, passwordHash };
+function genTempPassword() {
+  // senha temporária segura
+  return crypto.randomBytes(9).toString("base64url"); // ~12 chars
 }
 
 /* =========================
-   WEBHOOK HOTMART
+   SMTP (igual ao passwordReset)
 ========================= */
 
-router.post("/webhooks/hotmart", (req, res) => {
-  const hottok =
-    req.headers["x-hotmart-hottok"] ||
-    req.headers["x-hotmart-hottoken"] ||
-    "";
+function makeTransport() {
+  const host = String(process.env.SMTP_HOST || "").trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = String(process.env.SMTP_SECURE || "false") === "true";
+  const user = String(process.env.SMTP_USER || "").trim();
+  const pass = String(process.env.SMTP_PASS || "").trim();
 
-  if (!process.env.HOTMART_HOTTOK) {
-    console.warn("⚠️ HOTMART_HOTTOK não configurado no .env");
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    requireTLS: !secure,
+    tls: {
+      rejectUnauthorized: false,
+      minVersion: "TLSv1.2",
+    },
+  });
+}
+
+async function sendHotmartAccessEmail({ to, name, tempPassword }) {
+  const base = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const loginUrl = `${base}/index.html`;
+
+  const transport = makeTransport();
+
+  // Se SMTP estiver mal configurado, não quebra o webhook
+  try {
+    await transport.verify();
+  } catch (e) {
+    console.error("[SMTP] verify FALHOU (Hotmart email):", e?.message || e);
+    return { ok: false };
   }
 
-  if (String(hottok).trim() !== String(process.env.HOTMART_HOTTOK).trim()) {
-    console.warn("❌ Webhook Hotmart rejeitado: HOTTOK inválido");
-    return res.status(401).json({ ok: false });
-  }
+  const safeName = name || "Olá";
 
-  const payload = req.body || {};
-  const event = pickEvent(payload);
-  const email = pickEmail(payload);
+  const info = await transport.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject: "Seu acesso ao FluxoNF foi liberado ✅",
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5">
+        <h2>Acesso liberado ✅</h2>
+        <p>${safeName}, seu acesso ao <b>FluxoNF</b> foi criado com sucesso.</p>
 
-  console.log("✅ Hotmart webhook recebido:", { event, email });
+        <p><b>Link de acesso:</b><br/>
+        <a href="${loginUrl}">${loginUrl}</a></p>
 
-  if (!email) {
-    console.warn("⚠️ Webhook sem email de comprador. Ignorando.");
-    return res.json({ ok: true });
-  }
+        <p><b>Login:</b> ${to}<br/>
+        <b>Senha temporária:</b> ${tempPassword}</p>
 
-  /* =========================
-     COMPRA APROVADA
-  ========================= */
-  if (event === "PURCHASE_APPROVED") {
-    const exists = findUserByEmail(email);
+        <p style="margin-top:14px">
+          <b>Importante:</b> ao entrar, vá em <b>Configurações → Alterar senha</b> para definir uma senha só sua.
+        </p>
 
-    if (exists) {
-      setUserActiveByEmail(email, true);
-      console.log("🔓 Usuário reativado:", email);
+        <p style="color:#666;font-size:12px;margin-top:18px">
+          Se você não realizou essa compra, ignore este e-mail.
+        </p>
+      </div>
+    `,
+  });
+
+  console.log("[SMTP] Hotmart access email OK:", {
+    messageId: info?.messageId,
+    accepted: info?.accepted,
+    rejected: info?.rejected,
+  });
+
+  return { ok: true };
+}
+
+/* =========================
+   Webhook Hotmart
+========================= */
+
+router.post("/webhooks/hotmart", async (req, res) => {
+  try {
+    const hottok =
+      req.headers["x-hotmart-hottok"] ||
+      req.headers["x-hotmart-hottoken"] ||
+      "";
+
+    if (String(hottok).trim() !== String(process.env.HOTMART_HOTTOK || "").trim()) {
+      console.warn("❌ Webhook Hotmart rejeitado: HOTTOK inválido");
+      return res.status(401).json({ ok: false });
+    }
+
+    const payload = req.body || {};
+    const event = pickEvent(payload);
+    const email = pickEmail(payload);
+    const name = pickName(payload);
+
+    console.log("✅ Hotmart webhook recebido:", { event, email });
+
+    if (!email) {
+      console.warn("⚠️ Webhook sem email de comprador. Ignorando.");
       return res.json({ ok: true });
     }
 
-    const { tempPassword, passwordHash } = makeTempPasswordHash();
+    // ✅ 1) APROVADO: cria user NORMAL ou reativa
+    if (event === "PURCHASE_APPROVED") {
+      const exists = findUserByEmail(email);
 
-    createUser({
-      email,
-      passwordHash,
-      role: "user", // 🔒 garante que nunca será admin
-    });
+      // se já existe, só reativa e não reenvia email (evita spam)
+      if (exists) {
+        setUserActiveByEmail(email, true);
+        console.log("✅ Usuário reativado:", email);
+        return res.json({ ok: true });
+      }
 
-    console.log("👤 Usuário criado:", email);
-    console.log("🔑 Senha temporária (debug):", tempPassword);
-    // ⚠️ depois vamos substituir isso por envio de email
+      const tempPassword = genTempPassword();
+      const passwordHash = await hashPassword(tempPassword); // ✅ mesmo hash do auth
+
+      createUser({
+        email,
+        passwordHash,
+        role: "user", // ✅ GARANTE: NÃO ADM
+      });
+
+      console.log("✅ Usuário criado (role=user):", email);
+
+      // ✅ envia email com acesso
+      await sendHotmartAccessEmail({ to: email, name, tempPassword });
+
+      return res.json({ ok: true });
+    }
+
+    // ✅ 2) BLOQUEIOS
+    if (
+      event === "PURCHASE_CANCELED" ||
+      event === "PURCHASE_REFUNDED" ||
+      event === "PURCHASE_CHARGEBACK"
+    ) {
+      const u = setUserActiveByEmail(email, false);
+      if (u) console.log("⛔ Usuário bloqueado:", email);
+      else console.log("⚠️ Evento recebido, mas usuário não encontrado:", email);
+      return res.json({ ok: true });
+    }
 
     return res.json({ ok: true });
+  } catch (err) {
+    console.error("[HOTMART] error:", err?.message || err);
+    return res.status(500).json({ ok: false });
   }
-
-  /* =========================
-     BLOQUEIO DE ACESSO
-  ========================= */
-  if (
-    event === "PURCHASE_CANCELED" ||
-    event === "PURCHASE_REFUNDED" ||
-    event === "PURCHASE_CHARGEBACK"
-  ) {
-    const u = setUserActiveByEmail(email, false);
-
-    if (u) console.log("⛔ Usuário bloqueado:", email);
-    else console.log("⚠️ Evento recebido, mas usuário não encontrado:", email);
-
-    return res.json({ ok: true });
-  }
-
-  // Outros eventos: ignorar por enquanto
-  return res.json({ ok: true });
 });
 
 export default router;
