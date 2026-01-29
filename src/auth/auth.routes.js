@@ -7,12 +7,19 @@ import { requireAuth } from "./auth.middleware.js";
 
 const router = express.Router();
 
-function cookieOpts() {
-  const isProd = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+function cookieOpts(req) {
+  // Se estiver atrás de proxy (nginx / load balancer), ele envia x-forwarded-proto
+  const xfProto = String(req?.headers?.["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+
+  const isHttps = Boolean(req?.secure) || xfProto === "https";
+
   return {
     httpOnly: true,
     sameSite: "lax",
-    secure: isProd, // em prod com https fica true
+    secure: isHttps, // ✅ só liga Secure quando for HTTPS de verdade
     path: "/",
   };
 }
@@ -44,7 +51,8 @@ router.post("/login", async (req, res) => {
   db.prepare(`UPDATE users SET last_login_at = ? WHERE id = ?`)
     .run(new Date().toISOString(), user.id);
 
-  res.cookie("nfse_session", token, cookieOpts());
+  // ✅ importante: cookie Secure só em HTTPS real
+  res.cookie("nfse_session", token, cookieOpts(req));
 
   return res.json({
     ok: true,
@@ -56,7 +64,10 @@ router.post("/login", async (req, res) => {
 router.post("/logout", (req, res) => {
   const token = req.cookies?.nfse_session || "";
   if (token) deleteSessionByToken(token);
-  res.clearCookie("nfse_session", { path: "/" });
+
+  // ✅ limpa com os mesmos atributos
+  res.clearCookie("nfse_session", cookieOpts(req));
+
   return res.json({ ok: true });
 });
 
