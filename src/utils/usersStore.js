@@ -153,12 +153,17 @@ export async function createUser({ email, name = "", role = "user", password = "
 
     const finalName = String(name || "").trim() || "Cliente Hotmart";
 
+    const rootAdmin =
+      db.prepare(`SELECT id FROM users WHERE lower(trim(email)) = lower(trim(?)) LIMIT 1`).get("jussilene.valim@gmail.com") ||
+      db.prepare(`SELECT id FROM users WHERE upper(trim(role)) = 'ADMIN' ORDER BY id ASC LIMIT 1`).get();
+    const ownerAdminId = Number(rootAdmin?.id || 0) || null;
+
     const info = db
       .prepare(
-        `INSERT INTO users (name, email, role, is_active, password_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO users (name, email, role, is_active, password_hash, password_plain, created_at, owner_admin_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(finalName, e, role, 1, password_hash, new Date().toISOString());
+      .run(finalName, e, role, 1, password_hash, pw, new Date().toISOString(), ownerAdminId);
 
     return {
       id: info.lastInsertRowid,
@@ -258,7 +263,7 @@ export async function updatePasswordByEmail(email, newPassword) {
       if (!pw || pw.length < 6) return false;
 
       const newHash = await hashPassword(pw);
-      db.prepare(`UPDATE users SET password_hash = ? WHERE email = ?`).run(newHash, e);
+      db.prepare(`UPDATE users SET password_hash = ?, password_plain = ? WHERE email = ?`).run(newHash, pw, e);
       return true;
     }
   } catch (err) {

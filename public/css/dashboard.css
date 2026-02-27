@@ -1,94 +1,204 @@
-/* =========================
-   TEMA GLOBAL (LIGHT / DARK)
-   ========================= */
+/* =========================================================
+   FLUXO NF - THEME SYSTEM (Base44 inspired)
+   ========================================================= */
+
+/* =======================
+   ROOT VARIABLES
+   ======================= */
 
 :root {
   --bg-main: #f8fafc;
+  --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
+
   --text-main: #0f172a;
-  --text-muted: #475569;
+  --text-muted: #64748b;
+
   --border-main: #e2e8f0;
+
+  --hover-soft: #f1f5f9;
+  --active-soft: #e2e8f0;
+
+  --accent: #0ea5e9;
 }
+
+/* =======================
+   DARK MODE (Base44 Style)
+   ======================= */
 
 html.dark {
-  --bg-main: #0f172a;
-  --bg-card: #020617;
+  --bg-main: #0b1120;
+  --bg-sidebar: #0f172a;
+  --bg-card: #111827;
+
   --text-main: #e5e7eb;
   --text-muted: #94a3b8;
-  --border-main: #1e293b;
+
+  --border-main: #1f2937;
+
+  --hover-soft: rgba(255,255,255,0.05);
+  --active-soft: rgba(255,255,255,0.08);
+
+  --accent: #38bdf8;
 }
 
-/* aplica no layout (FORÇA por cima do Tailwind) */
+/* =======================
+   GLOBAL LAYOUT
+   ======================= */
+
 body {
-  background-color: var(--bg-main) !important;
-  color: var(--text-main) !important;
+  background: var(--bg-main);
+  color: var(--text-main);
+  transition: background .25s ease, color .25s ease;
 }
 
-/* o seu HTML tem body class="... bg-slate-50" — sobrescreve */
-body.bg-slate-50 {
-  background-color: var(--bg-main) !important;
+/* Sidebar */
+.sidebar {
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-main);
 }
 
-/* cards / blocos genéricos */
+/* Cards / Panels */
 .card,
+.bg-white,
 .panel,
 .box,
-table,
-thead,
-tbody,
-tr,
-td,
-th {
-  background-color: var(--bg-card) !important;
-  color: var(--text-main) !important;
-  border-color: var(--border-main) !important;
+.tab-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  border-radius: 14px;
+  transition: background .25s ease, border .25s ease;
 }
 
-/* textos auxiliares */
-.text-muted {
-  color: var(--text-muted) !important;
+/* Tables */
+table {
+  background: var(--bg-card);
 }
 
-/* =========================
-   OVERRIDES do Tailwind (CDN)
-   Só entram quando html.dark está ativo
-   ========================= */
-
-html.dark .bg-white {
-  background-color: var(--bg-card) !important;
+th, td {
+  border-color: var(--border-main);
 }
 
-html.dark .bg-slate-50,
-html.dark .bg-slate-100 {
-  background-color: var(--bg-main) !important;
-}
+/* =======================
+   TEXT COLORS
+   ======================= */
 
-/* bordas Tailwind */
-html.dark .border-slate-200,
-html.dark .border-slate-100,
-html.dark .border-slate-300 {
-  border-color: var(--border-main) !important;
-}
-
-/* textos Tailwind */
-html.dark .text-slate-900,
-html.dark .text-slate-800,
-html.dark .text-slate-700 {
+.text-slate-900,
+.text-slate-800,
+.text-slate-700 {
   color: var(--text-main) !important;
 }
 
-html.dark .text-slate-600,
-html.dark .text-slate-500,
-html.dark .text-slate-400 {
+.text-slate-600,
+.text-slate-500,
+.text-slate-400 {
   color: var(--text-muted) !important;
 }
 
-/* hovers Tailwind (precisa escapar ":" no CSS) */
-html.dark .hover\:bg-slate-50:hover,
-html.dark .hover\:bg-slate-100:hover {
-  background-color: rgba(255, 255, 255, 0.06) !important;
+/* =======================
+   HOVER STATES
+   ======================= */
+
+.hover\:bg-slate-50:hover,
+.hover\:bg-slate-100:hover {
+  background: var(--hover-soft) !important;
 }
 
-html.dark .hover\:bg-sky-50:hover {
-  background-color: rgba(56, 189, 248, 0.08) !important;
+.hover\:bg-sky-50:hover {
+  background: rgba(56,189,248,0.08) !important;
+}
+
+/* Active Tab */
+.tab-btn {
+  transition: all .2s ease;
+  border-radius: 10px;
+}
+
+.tab-btn.border-slate-900 {
+  background: var(--active-soft);
+  border-color: var(--accent) !important;
+}
+
+/* Selected table row */
+.bg-sky-100 {
+  background: rgba(56,189,248,0.12) !important;
+}
+
+/* =======================
+   BUTTONS
+   ======================= */
+
+button {
+  transition: all .2s ease;
+}
+
+button.bg-slate-900 {
+  background: var(--accent) !important;
+  border: none;
+}
+
+button.bg-slate-900:hover {
+  opacity: .9;
+}
+
+/* Outline buttons */
+.border-slate-200 {
+  border-color: var(--border-main) !important;
+}
+
+/* =======================
+   INPUTS
+   ======================= */
+
+input,
+select,
+textarea {
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  color: var(--text-main);
+  border-radius: 10px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(56,189,248,0.2);
+}
+
+/* =======================
+   MODAL
+   ======================= */
+
+#settingsModal > div {
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+}
+
+/* =======================
+   SCROLLBAR (Dark polish)
+   ======================= */
+
+html.dark ::-webkit-scrollbar {
+  width: 10px;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 6px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #0b1120;
+}
+
+/* =======================
+   SMOOTH TRANSITIONS
+   ======================= */
+
+* {
+  transition: background-color .2s ease,
+              border-color .2s ease,
+              color .2s ease;
 }

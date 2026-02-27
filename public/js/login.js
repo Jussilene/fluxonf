@@ -265,6 +265,12 @@ if (form) {
           email: u.email || email,
           displayName: u.name || (email.includes("@") ? email.split("@")[0] : email),
           role: (u.role || "USER").toLowerCase(),
+          plan: (u.plan || "STARTER").toUpperCase(),
+          plan_value: Number(u.plan_value || 49.9),
+          company_name: u.company_name || "",
+          cnpj: u.cnpj || "",
+          whatsapp: u.whatsapp || "",
+          created_at: u.created_at || null,
         })
       );
 

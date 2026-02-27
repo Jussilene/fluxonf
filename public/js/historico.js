@@ -1,6 +1,5 @@
 // public/js/historico.js
 
-// Formata "2025-12-10T19:57:07.680Z" -> "10/12/2025 16:57"
 function formatDateTimeBr(isoString) {
   if (!isoString) return "N/D";
   const d = new Date(isoString);
@@ -16,7 +15,6 @@ function formatDateTimeBr(isoString) {
   return `${dia}/${mes}/${ano} ${hora}:${min}`;
 }
 
-// ✅ headers padrão (multi-tenant) — igual lógica do dashboard.js, mas local ao histórico
 function historicoApiHeaders(extra = {}) {
   let currentUser = {};
   try {
@@ -68,7 +66,6 @@ function renderHistoricoTabela(lista) {
         ? "Manual / Único"
         : item.tipo || "N/D";
 
-    // ✅ compatibilidade: backend pode mandar totalArquivos OU arquivosCount
     const total =
       (item.totalArquivos ?? item.arquivosCount ?? 0);
 
@@ -118,7 +115,6 @@ async function carregarHistoricoExecucoes() {
 
     const data = await resp.json().catch(() => ({}));
 
-    // ✅ compatibilidade: backend pode responder {success, items} OU {ok, historico}
     const okFlag =
       (data && data.ok === true) ||
       (data && data.success === true);
@@ -147,14 +143,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const historicoTabButton = document.querySelector('[data-tab="historico"]');
   const reloadBtn = document.getElementById("btnReloadHistorico");
 
-  // Quando clicar na aba HISTÓRICO, carrega os dados
   if (historicoTabButton) {
     historicoTabButton.addEventListener("click", () => {
       carregarHistoricoExecucoes();
     });
   }
 
-  // Botão "Atualizar histórico"
   if (reloadBtn) {
     reloadBtn.addEventListener("click", () => {
       carregarHistoricoExecucoes();

@@ -7,6 +7,26 @@ import { requireAuth } from "./auth.middleware.js";
 
 const router = express.Router();
 
+function normalizePlanForResponse(plan, planValue, role = "") {
+  if (String(role || "").trim().toUpperCase() === "ADMIN") {
+    return { plan: null, plan_value: null };
+  }
+
+  const p = String(plan || "").trim().toUpperCase();
+  const v = Number(planValue || 0);
+
+  if (p === "LANCAMENTO") return { plan: "STARTER", plan_value: 49.9 };
+  if (p === "STARTER") return { plan: "STARTER", plan_value: 49.9 };
+  if (p === "PRO") return { plan: "EMPRESARIAL", plan_value: 147.0 };
+
+  if (p === "FUNDADORES") return { plan: "STARTER", plan_value: v || 49.9 };
+  if (p === "ESSENCIAL") return { plan: "ESSENCIAL", plan_value: v || 49.9 };
+  if (p === "PROFISSIONAL") return { plan: "PROFISSIONAL", plan_value: v || 97.0 };
+  if (p === "EMPRESARIAL") return { plan: "EMPRESARIAL", plan_value: v || 147.0 };
+
+  return { plan: "ESSENCIAL", plan_value: 49.9 };
+}
+
 function cookieOpts(req) {
   // Se estiver atrás de proxy (nginx / load balancer), ele envia x-forwarded-proto
   const xfProto = String(req?.headers?.["x-forwarded-proto"] || "")
@@ -34,7 +54,7 @@ router.post("/login", async (req, res) => {
   const normalizedEmail = String(email).trim().toLowerCase();
 
   const user = db
-    .prepare(`SELECT id, name, email, role, is_active, password_hash FROM users WHERE email = ?`)
+    .prepare(`SELECT id, name, email, role, owner_admin_id, is_active, password_hash, company_name, cnpj, whatsapp, plan, plan_value, created_at FROM users WHERE email = ?`)
     .get(normalizedEmail);
 
   if (!user || !user.is_active) {
@@ -54,9 +74,22 @@ router.post("/login", async (req, res) => {
   // ✅ importante: cookie Secure só em HTTPS real
   res.cookie("nfse_session", token, cookieOpts(req));
 
+  const normalizedPlan = normalizePlanForResponse(user.plan, user.plan_value, user.role);
+
   return res.json({
     ok: true,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      company_name: user.company_name || "",
+      cnpj: user.cnpj || "",
+      whatsapp: user.whatsapp || "",
+      plan: normalizedPlan.plan,
+      plan_value: normalizedPlan.plan_value,
+      created_at: user.created_at || null,
+    },
   });
 });
 
@@ -73,7 +106,15 @@ router.post("/logout", (req, res) => {
 
 // GET /auth/me
 router.get("/me", requireAuth, (req, res) => {
-  return res.json({ ok: true, user: req.user });
+  const normalizedPlan = normalizePlanForResponse(req.user?.plan, req.user?.plan_value, req.user?.role);
+  return res.json({
+    ok: true,
+    user: {
+      ...req.user,
+      plan: normalizedPlan.plan,
+      plan_value: normalizedPlan.plan_value,
+    },
+  });
 });
 
 // POST /auth/update-profile  (nome/email)
@@ -93,8 +134,13 @@ router.post("/update-profile", requireAuth, (req, res) => {
   }
 
   db.prepare(`UPDATE users SET name = ?, email = ? WHERE id = ?`).run(newName, newEmail, req.user.id);
+  const updated = db.prepare(`
+    SELECT id, name, email, role, is_active, last_login_at, company_name, cnpj, whatsapp, plan, plan_value, created_at
+    FROM users WHERE id = ?
+  `).get(req.user.id);
 
-  return res.json({ ok: true });
+  res.set("Cache-Control", "no-store");
+  return res.json({ ok: true, user: updated || null });
 });
 
 // POST /auth/change-password
@@ -107,9 +153,19 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 
   const hash = await hashPassword(pw);
-  db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hash, req.user.id);
+  const id = Number(req.user?.id);
+  const email = String(req.user?.email || "").trim().toLowerCase();
+  let info = { changes: 0 };
 
-  return res.json({ ok: true });
+  if (Number.isFinite(id)) {
+    info = db.prepare(`UPDATE users SET password_hash = ?, password_plain = ? WHERE id = ?`).run(hash, pw, id);
+  }
+  if ((!info?.changes || info.changes < 1) && email) {
+    info = db.prepare(`UPDATE users SET password_hash = ?, password_plain = ? WHERE lower(trim(email)) = lower(trim(?))`).run(hash, pw, email);
+  }
+
+  res.set("Cache-Control", "no-store");
+  return res.json({ ok: true, password_plain: pw, updated: Number(info?.changes || 0) });
 });
 
 export default router;

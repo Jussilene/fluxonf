@@ -1,4 +1,4 @@
-// src/bot/nfseBot.js
+﻿// src/bot/nfseBot.js
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
@@ -6,16 +6,18 @@ import { registrarExecucao } from "../models/historico.model.js";
 
 const NFSE_PORTAL_URL =
   process.env.NFSE_PORTAL_URL ||
-  // ✅ Mantém o link exatamente como você informou (ReturnUrl com %2F maiúsculo)
+  // âœ… MantÃ©m o link exatamente como vocÃª informou (ReturnUrl com %2F maiÃºsculo)
   "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2FEmissorNacional";
 
 const isLinux = process.platform === "linux";
 
-// ✅ AJUSTE MÍNIMO #1: controlar headless via .env (NFSE_HEADLESS / NFS_HEADLESS)
+// âœ… AJUSTE MÃNIMO #1: controlar headless via .env (NFSE_HEADLESS / NFS_HEADLESS)
 // - NFSE_HEADLESS=0 -> abre navegador
 // - NFSE_HEADLESS=1 -> headless
 async function launchNFSEBrowser() {
   const raw = String(process.env.NFSE_HEADLESS ?? process.env.NFS_HEADLESS ?? "").trim();
+  const slowMoRaw = String(process.env.NFSE_SLOWMO_MS ?? "").trim();
+  const slowMo = /^\d+$/.test(slowMoRaw) ? Number(slowMoRaw) : 0;
 
   let headless;
   if (raw === "0" || raw.toLowerCase() === "false") headless = false;
@@ -28,7 +30,7 @@ async function launchNFSEBrowser() {
 
   return await chromium.launch({
     headless,
-    slowMo: headless ? 0 : 150,
+    slowMo,
     args: isLinux
       ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
       : [],
@@ -49,10 +51,10 @@ function buildPeriodoLabel(dataInicial, dataFinal) {
   const di = dataInicial ? formatDateBrFromISO(dataInicial) : null;
   const df = dataFinal ? formatDateBrFromISO(dataFinal) : null;
 
-  if (!di && !df) return "N/D até N/D";
-  if (di && !df) return `${di} até N/D`;
-  if (!di && df) return `N/D até ${df}`;
-  return `${di} até ${df}`;
+  if (!di && !df) return "N/D atÃ© N/D";
+  if (di && !df) return `${di} atÃ© N/D`;
+  if (!di && df) return `N/D atÃ© ${df}`;
+  return `${di} atÃ© ${df}`;
 }
 
 function parseBrDateToDate(str) {
@@ -107,7 +109,7 @@ function extractCnpjLike(str) {
 }
 
 // --------------------
-// ✅ estrutura por job (SEM criar pastas de tipo automaticamente)
+// âœ… estrutura por job (SEM criar pastas de tipo automaticamente)
 // downloads/jobs/<periodo>/<timestamp>  (apenas jobDir)
 // --------------------
 function buildJobPaths(pastaDestino, dataInicial, dataFinal) {
@@ -118,7 +120,7 @@ function buildJobPaths(pastaDestino, dataInicial, dataFinal) {
   const jobDir = path.join(jobsRoot, String(Date.now()));
   ensureDir(jobDir);
 
-  // ❗ não cria Emitidas/Recebidas/Canceladas aqui
+  // â— nÃ£o cria Emitidas/Recebidas/Canceladas aqui
   const emitidasDir = path.join(jobDir, "Emitidas");
   const recebidasDir = path.join(jobDir, "Recebidas");
   const canceladasDir = path.join(jobDir, "Canceladas");
@@ -131,11 +133,72 @@ function getTipoDirFromRoot(rootJobDir, tipoNota) {
   if (tipoNota === "canceladas") return path.join(rootJobDir, "Canceladas");
   return path.join(rootJobDir, "Emitidas");
 }
+function resolveA1CertConfig(params = {}, pushLog = () => {}) {
+  try {
+    const useA1 =
+      params?.usarCertificadoA1 === true ||
+      String(params?.authType || "").toLowerCase().includes("certificado");
+    if (!useA1) return null;
+
+    const portalOrigin =
+      String(params?.certOrigin || process.env.NFSE_CERT_ORIGIN || "https://www.nfse.gov.br").trim() ||
+      "https://www.nfse.gov.br";
+
+    let pfxPath = String(params?.certPfxPath || params?.pfxPath || process.env.NFSE_CERT_PFX_PATH || "").trim();
+    const passphrase = String(params?.certPassphrase || params?.passphrase || process.env.NFSE_CERT_PFX_PASS || "");
+    const empresaId = String(params?.empresaId || "").trim();
+    const userEmail = String(params?.usuarioEmail || "").trim().toLowerCase();
+
+    if (!pfxPath) {
+      pushLog("[BOT] Modo certificado A1 ativo, mas sem caminho PFX configurado.");
+      return null;
+    }
+
+    if (!fs.existsSync(pfxPath)) {
+      const base = path.basename(pfxPath);
+      if (base) {
+        const userSlug = userEmail.replace(/[^a-z0-9._-]/g, "_");
+        const userDir = path.resolve(process.cwd(), "certs", userSlug);
+        const byIdPfx = empresaId ? path.join(userDir, `captura-empresa-${empresaId}.pfx`) : "";
+        const byIdP12 = empresaId ? path.join(userDir, `captura-empresa-${empresaId}.p12`) : "";
+        const byName = path.join(userDir, base);
+        const candidates = [byIdPfx, byIdP12, byName].filter(Boolean);
+        const found = candidates.find((c) => fs.existsSync(c));
+        if (found) {
+          pfxPath = found;
+          pushLog(`[BOT] Certificado A1 resolvido automaticamente: ${pfxPath}`);
+        }
+      }
+    }
+
+    if (!fs.existsSync(pfxPath)) {
+      pushLog(`[BOT] PFX informado nao existe: ${pfxPath}`);
+      return null;
+    }
+
+    const pfxBuffer = fs.readFileSync(pfxPath);
+    return {
+      portalOrigin,
+      passphrase,
+      pfxPath,
+      clientCertificates: [
+        {
+          origin: portalOrigin,
+          pfx: pfxBuffer,
+          passphrase: passphrase || undefined,
+        },
+      ],
+    };
+  } catch (err) {
+    pushLog(`[BOT] Falha ao preparar certificado A1: ${err?.message || err}`);
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------
-// ✅ Canceladas robusto
-// Agora funciona com coluna "Situação" sendo ÍCONE (sem texto):
-// lê title/tooltip/aria-label/data-original-title ou HTML interno.
+// âœ… Canceladas robusto
+// Agora funciona com coluna "SituaÃ§Ã£o" sendo ÃCONE (sem texto):
+// lÃª title/tooltip/aria-label/data-original-title ou HTML interno.
 // ---------------------------------------------------------------------
 function normalizeText(s = "") {
   return String(s)
@@ -168,7 +231,7 @@ async function findSituacaoColumnIndex(page) {
 }
 
 async function readSituacaoSignalsFromCell(cellHandle) {
-  // tenta pegar texto + atributos (tooltip) do próprio TD e de elementos internos
+  // tenta pegar texto + atributos (tooltip) do prÃ³prio TD e de elementos internos
   try {
     const payload = await cellHandle.evaluate((cell) => {
       const pickAttrs = (el) => {
@@ -205,13 +268,13 @@ async function readSituacaoSignalsFromCell(cellHandle) {
         "[title],[aria-label],[data-original-title],[data-bs-original-title],[data-tooltip]"
       );
 
-      // limita para não explodir
+      // limita para nÃ£o explodir
       const max = Math.min(els.length, 15);
       for (let i = 0; i < max; i++) {
         attrs.push(...pickAttrs(els[i]));
       }
 
-      // html bruto (às vezes tem 'cancelada' em classes/labels)
+      // html bruto (Ã s vezes tem 'cancelada' em classes/labels)
       const html = cell.innerHTML || "";
 
       return { texts, attrs, html };
@@ -240,7 +303,7 @@ async function isRowCanceladaBySituacaoIdx(rowHandle, situacaoIdx) {
     // 1) tenta texto direto
     const rawText = ((await cell.innerText().catch(() => "")) || "").trim();
 
-    // 2) se não tem texto, lê tooltip/attrs/html
+    // 2) se nÃ£o tem texto, lÃª tooltip/attrs/html
     const signals = await readSituacaoSignalsFromCell(cell);
 
     const allParts = [
@@ -302,7 +365,7 @@ async function safeClickHandle(handle) {
 }
 
 async function baixarPdfPorRequest({ context, page, urlPdf, destinoPdf, log }) {
-  if (!urlPdf) throw new Error("URL do PDF não encontrada para fallback.");
+  if (!urlPdf) throw new Error("URL do PDF nÃ£o disponÃ­vel para fallback.");
 
   const abs = makeAbsoluteUrl(page.url(), urlPdf);
   log?.(`[BOT] (PDF) Tentando fallback via request autenticado: ${abs}`);
@@ -318,7 +381,7 @@ async function baixarPdfPorRequest({ context, page, urlPdf, destinoPdf, log }) {
   }
 
   const buffer = await resp.body().catch(() => null);
-  if (!buffer) throw new Error("Request OK, mas não consegui ler body() do PDF.");
+  if (!buffer) throw new Error("Request OK, mas nÃ£o consegui ler body() do PDF.");
 
   fs.mkdirSync(path.dirname(destinoPdf), { recursive: true });
   fs.writeFileSync(destinoPdf, buffer);
@@ -353,10 +416,10 @@ async function baixarPdfRobusto({ context, page, clickPdfOption, destinoPdf, log
 
   if (first.type === "response" && first.r) {
     const resp = first.r;
-    if (!resp.ok()) throw new Error(`Response do PDF não OK (status ${resp.status()})`);
+    if (!resp.ok()) throw new Error(`Response do PDF nÃ£o OK (status ${resp.status()})`);
 
     const buffer = await resp.body().catch(() => null);
-    if (!buffer) throw new Error("Response abriu, mas não consegui ler o body() do PDF.");
+    if (!buffer) throw new Error("Response abriu, mas nÃ£o consegui ler o body() do PDF.");
 
     fs.writeFileSync(destinoPdf, buffer);
     log?.(`[BOT] PDF (via response) salvo: ${destinoPdf}`);
@@ -415,7 +478,7 @@ async function baixarPdfRobusto({ context, page, clickPdfOption, destinoPdf, log
           const buffer = await resp.body().catch(() => null);
           if (buffer) {
             fs.writeFileSync(destinoPdf, buffer);
-            log?.(`[BOT] PDF (via response após cancelamento) salvo: ${destinoPdf}`);
+            log?.(`[BOT] PDF (via response apÃ³s cancelamento) salvo: ${destinoPdf}`);
             return true;
           }
         }
@@ -426,7 +489,7 @@ async function baixarPdfRobusto({ context, page, clickPdfOption, destinoPdf, log
           const buffer = await pop.pdf({ format: "A4", printBackground: true }).catch(() => null);
           if (buffer) {
             fs.writeFileSync(destinoPdf, buffer);
-            log?.(`[BOT] PDF (via popup após cancelamento) salvo: ${destinoPdf}`);
+            log?.(`[BOT] PDF (via popup apÃ³s cancelamento) salvo: ${destinoPdf}`);
             await pop.close().catch(() => {});
             return true;
           }
@@ -466,12 +529,12 @@ async function baixarPdfRobusto({ context, page, clickPdfOption, destinoPdf, log
     return await baixarPdfPorRequest({ context, page, urlPdf: href, destinoPdf, log });
   }
 
-  throw new Error("Não houve evento de download/popup/response para o PDF (timeout).");
+  throw new Error("NÃ£o houve evento de download/popup/response para o PDF (timeout).");
 }
 
 // ---------------------------------------------------------------------
 // Helper: clicar e capturar arquivo usando evento de download do Playwright
-// ✅ AJUSTE DE PASTAS: só cria a pasta de destino quando realmente vai salvar
+// âœ… AJUSTE DE PASTAS: sÃ³ cria a pasta de destino quando realmente vai salvar
 // ---------------------------------------------------------------------
 async function clickAndCaptureFile({
   page,
@@ -497,9 +560,9 @@ async function clickAndCaptureFile({
 
     if (!download) {
       pushLog(
-        `[BOT] Aviso: não foi possível identificar um download ${
+        `[BOT] Aviso: nÃ£o foi possÃ­vel identificar um download ${
           extPreferida || "PDF/XML"
-        } após o clique na linha ${linhaIndex}.`
+        } apÃ³s o clique na linha ${linhaIndex}.`
       );
       return false;
     }
@@ -516,15 +579,15 @@ async function clickAndCaptureFile({
     const expectedExt =
       extPreferida === "pdf" ? ".pdf" : extPreferida === "xml" ? ".xml" : null;
 
-    // ✅ Ajuste: se foi pedido XML, mas veio PDF (ou vice-versa), NÃO salva (evita misturar)
+    // âœ… Ajuste: se foi pedido XML, mas veio PDF (ou vice-versa), NÃƒO salva (evita misturar)
     if (expectedExt && ext && ext !== expectedExt) {
       pushLog(
-        `[BOT] Aviso: download inesperado na linha ${linhaIndex}. Esperado "${expectedExt}", mas veio "${ext}" (arquivo: "${originalName}"). Ignorando para não misturar.`
+        `[BOT] Aviso: download inesperado na linha ${linhaIndex}. Esperado "${expectedExt}", mas veio "${ext}" (arquivo: "${originalName}"). Ignorando para nÃ£o misturar.`
       );
       return false;
     }
 
-    // Se não vier extensão, tenta assumir pela preferida
+    // Se nÃ£o vier extensÃ£o, tenta assumir pela preferida
     if (!ext) {
       ext = expectedExt || ".bin";
       originalName += ext;
@@ -546,7 +609,7 @@ async function clickAndCaptureFile({
     const newName = `${tipoSlug}-${cnpjParte}-${index}${ext}`;
     const savePath = path.join(finalDir, newName);
 
-    // ✅ cria só aqui, quando realmente vai salvar algo
+    // âœ… cria sÃ³ aqui, quando realmente vai salvar algo
     ensureDir(finalDir);
 
     await download.saveAs(savePath);
@@ -563,10 +626,10 @@ async function clickAndCaptureFile({
 }
 
 // ---------------------------------------------------------------------
-// ✅ Navegação por tipo
+// âœ… NavegaÃ§Ã£o por tipo
 // - Emitidas: /Notas/Emitidas
 // - Recebidas: /Notas/Recebidas
-// - Canceladas: ficam na lista de Emitidas (Situação=cancelada)
+// - Canceladas: ficam na lista de Emitidas (SituaÃ§Ã£o=cancelada)
 // ---------------------------------------------------------------------
 async function navigateToTipo(page, tipoNota, pushLog) {
   const emitidasUrl =
@@ -577,7 +640,7 @@ async function navigateToTipo(page, tipoNota, pushLog) {
 
   if (tipoNota === "recebidas") {
     try {
-      pushLog('[BOT] Tentando clicar no ícone "NFS-e Recebidas"...');
+      pushLog('[BOT] Tentando clicar no Ã­cone "NFS-e Recebidas"...');
       await page.click('[title="NFS-e Recebidas"]', { timeout: 8000 });
       await page.waitForURL("**/Notas/Recebidas", { timeout: 15000 }).catch(() => {});
       pushLog("[BOT] Tela de Recebidas aberta.");
@@ -592,7 +655,7 @@ async function navigateToTipo(page, tipoNota, pushLog) {
 
   if (tipoNota === "canceladas") {
     pushLog(
-      '[BOT] Tipo "canceladas": portal costuma listar canceladas dentro de "Emitidas" (coluna Situação). Abrindo Emitidas...'
+      '[BOT] Tipo "canceladas": portal costuma listar canceladas dentro de "Emitidas" (coluna SituaÃ§Ã£o). Abrindo Emitidas...'
     );
     await page
       .goto(emitidasUrl, { waitUntil: "networkidle", timeout: 20000 })
@@ -607,7 +670,7 @@ async function navigateToTipo(page, tipoNota, pushLog) {
 
   // emitidas (default)
   try {
-    pushLog('[BOT] Tentando clicar no ícone "NFS-e Emitidas"...');
+    pushLog('[BOT] Tentando clicar no Ã­cone "NFS-e Emitidas"...');
     await page.click('[title="NFS-e Emitidas"]', { timeout: 8000 });
     await page.waitForURL("**/Notas/Emitidas", { timeout: 15000 }).catch(() => {});
     pushLog("[BOT] Tela de Emitidas aberta.");
@@ -621,7 +684,7 @@ async function navigateToTipo(page, tipoNota, pushLog) {
 }
 
 // ---------------------------------------------------------------------
-// ✅ Filtro de datas (portal -> fallback antigo -> fallback tabela)
+// âœ… Filtro de datas (portal -> fallback antigo -> fallback tabela)
 // ---------------------------------------------------------------------
 async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
   let usarFiltroNaTabela = false;
@@ -643,35 +706,35 @@ async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
       const hasFim = (await inputDataFinal.count().catch(() => 0)) > 0;
 
       pushLog(
-        `[BOT] Campos de data detectados? Data Inicial=${hasIni ? "sim" : "não"} | Data Final=${
-          hasFim ? "sim" : "não"
+        `[BOT] Campos de data detectados? Data Inicial=${hasIni ? "sim" : "nÃ£o"} | Data Final=${
+          hasFim ? "sim" : "nÃ£o"
         }`
       );
 
       if ((hasIni && diBr) || (hasFim && dfBr)) {
         if (hasIni && diBr) {
-          await inputDataInicial.first().click({ delay: 50 });
+          await inputDataInicial.first().click();
           await page.keyboard.press("Control+A");
-          await page.keyboard.type(diBr, { delay: 25 });
+          await page.keyboard.type(diBr);
         }
 
         if (hasFim && dfBr) {
-          await inputDataFinal.first().click({ delay: 50 });
+          await inputDataFinal.first().click();
           await page.keyboard.press("Control+A");
-          await page.keyboard.type(dfBr, { delay: 25 });
+          await page.keyboard.type(dfBr);
         }
 
         const btnFiltrar = page.getByRole("button", { name: /filtrar/i });
 
         await Promise.all([
           page.waitForLoadState("networkidle").catch(() => {}),
-          btnFiltrar.click({ delay: 50 }).catch(() => {}),
+          btnFiltrar.click().catch(() => {}),
         ]);
 
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(250);
 
         pushLog(
-          `[BOT] Filtro de período aplicado no portal (Data Inicial/Data Final): ${buildPeriodoLabel(
+          `[BOT] Filtro de perÃ­odo aplicado no portal (Data Inicial/Data Final): ${buildPeriodoLabel(
             dataInicial,
             dataFinal
           )}.`
@@ -681,7 +744,7 @@ async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
       }
     } catch (err) {
       pushLog(
-        `[BOT] Não consegui aplicar filtro do portal (labels/Filtrar): ${err.message}. Vou tentar inputs alternativos e/ou filtrar pela coluna "Emissão".`
+        `[BOT] NÃ£o consegui aplicar filtro do portal (labels/Filtrar): ${err.message}. Vou tentar inputs alternativos e/ou filtrar pela coluna "EmissÃ£o".`
       );
     }
 
@@ -690,7 +753,7 @@ async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
       const diBr = formatDateBrFromISO(dataInicial);
       const dfBr = formatDateBrFromISO(dataFinal);
 
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(150);
 
       const dataInicialInput =
         (await page.$(
@@ -717,9 +780,9 @@ async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
 
         if (botaoPesquisar) {
           await botaoPesquisar.click();
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(450);
           pushLog(
-            `[BOT] Filtro de período aplicado pelos campos (fallback antigo): ${buildPeriodoLabel(
+            `[BOT] Filtro de perÃ­odo aplicado pelos campos (fallback antigo): ${buildPeriodoLabel(
               dataInicial,
               dataFinal
             )}.`
@@ -734,20 +797,163 @@ async function applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog) {
     } catch (err2) {
       usarFiltroNaTabela = true;
       pushLog(
-        `[BOT] Erro ao aplicar filtro por campos (fallback antigo): ${err2.message}. Vou filtrar pela coluna "Emissão".`
+        `[BOT] Erro ao aplicar filtro por campos (fallback antigo): ${err2.message}. Vou filtrar pela coluna "EmissÃ£o".`
       );
     }
   }
 
   if (usarFiltroNaTabela && (dataInicial || dataFinal)) {
-    pushLog("[BOT] Não localizei campos de data. Vou filtrar pela coluna 'Emissão' da tabela.");
+    pushLog("[BOT] NÃ£o localizei campos de data. Vou filtrar pela coluna 'EmissÃ£o' da tabela.");
   }
 
   return { usarFiltroNaTabela };
 }
 
+async function getTableSignature(page) {
+  const count = await page.locator("table tbody tr").count().catch(() => 0);
+  const first = await page
+    .locator("table tbody tr")
+    .first()
+    .innerText()
+    .catch(() => "");
+  return `${page.url()}|${count}|${String(first || "").trim()}`;
+}
+
+async function goToNextTablePage(page, pushLog, currentPage = 1) {
+  const before = await getTableSignature(page);
+
+  const clickInfo = await page
+    .evaluate((cp) => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = window.getComputedStyle(el);
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          st.display !== "none" &&
+          st.visibility !== "hidden" &&
+          st.opacity !== "0"
+        );
+      };
+      const isDisabled = (el) => {
+        if (!el) return true;
+        if (el.matches("[disabled], [aria-disabled='true']")) return true;
+        if (el.classList.contains("disabled")) return true;
+        const disabledParent = el.closest(".disabled, [aria-disabled='true']");
+        return !!disabledParent;
+      };
+
+      const all = Array.from(document.querySelectorAll("a, button")).filter(
+        (el) => isVisible(el) && !isDisabled(el)
+      );
+
+      // Rodapé da lista (onde fica o paginador) para evitar clicar em elementos aleatórios.
+      const bottomCandidates = all.filter(
+        (el) => el.getBoundingClientRect().top >= window.innerHeight * 0.55
+      );
+
+      const nextPageText = String(Number(cp) + 1);
+      let target =
+        bottomCandidates.find((el) => (el.textContent || "").trim() === nextPageText) || null;
+      let strategy = `page-${nextPageText}`;
+
+      if (!target) {
+        const nextLabels = ["›", ">", "»", "Próxima", "Proxima", "Próximo", "Proximo", "Next"];
+        target =
+          bottomCandidates.find((el) =>
+            nextLabels.includes((el.textContent || "").trim())
+          ) || null;
+        strategy = "next-control";
+      }
+
+      if (!target) return { clicked: false, reason: "next-target-not-found" };
+
+      target.click();
+      return { clicked: true, strategy, label: (target.textContent || "").trim() };
+    }, currentPage)
+    .catch(() => ({ clicked: false, reason: "evaluate-error" }));
+
+  if (!clickInfo?.clicked) return false;
+
+  await Promise.race([
+    page
+      .waitForFunction(
+        (prevSig) => {
+          const rows = document.querySelectorAll("table tbody tr");
+          const first = rows.length ? (rows[0].innerText || "").trim() : "";
+          const sig = `${location.href}|${rows.length}|${first}`;
+          return sig !== prevSig;
+        },
+        before,
+        { timeout: 20000 }
+      )
+      .catch(() => null),
+    page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => null),
+    page.waitForTimeout(250),
+  ]).catch(() => null);
+
+  let after = await getTableSignature(page);
+  if (after === before) {
+    // fallback extra: tenta avançar pelo controle "›" e revalida mudança
+    const secondTry = await page
+      .evaluate(() => {
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const st = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+        };
+        const isDisabled = (el) => {
+          if (!el) return true;
+          if (el.matches("[disabled], [aria-disabled='true']")) return true;
+          if (el.classList.contains("disabled")) return true;
+          const disabledParent = el.closest(".disabled, [aria-disabled='true']");
+          return !!disabledParent;
+        };
+        const nextLabels = ["›", ">", "»", "Próxima", "Proxima", "Próximo", "Proximo", "Next"];
+        const nodes = Array.from(document.querySelectorAll("a,button")).filter(
+          (el) => isVisible(el) && !isDisabled(el)
+        );
+        const bottom = nodes.filter((el) => el.getBoundingClientRect().top >= window.innerHeight * 0.45);
+        const target = bottom.find((el) => nextLabels.includes((el.textContent || "").trim()));
+        if (!target) return false;
+        target.click();
+        return true;
+      })
+      .catch(() => false);
+
+    if (!secondTry) return false;
+
+    await Promise.race([
+      page
+        .waitForFunction(
+          (prevSig) => {
+            const rows = document.querySelectorAll("table tbody tr");
+            const first = rows.length ? (rows[0].innerText || "").trim() : "";
+            const sig = `${location.href}|${rows.length}|${first}`;
+            return sig !== prevSig;
+          },
+          before,
+          { timeout: 20000 }
+        )
+        .catch(() => null),
+      page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => null),
+      page.waitForTimeout(250),
+    ]).catch(() => null);
+
+    after = await getTableSignature(page);
+    if (after === before) return false;
+  }
+
+  pushLog(
+    `[BOT] Avancando para pagina ${currentPage + 1} (${clickInfo.strategy}${clickInfo.label ? `: ${clickInfo.label}` : ""})...`
+  );
+  return true;
+}
+
 // ---------------------------------------------------------------------
-// MODO SIMULAÇÃO (mantido) – ✅ AJUSTE: não cria pastas de tipo automaticamente
+// MODO SIMULAÃ‡ÃƒO (mantido) â€“ âœ… AJUSTE: nÃ£o cria pastas de tipo automaticamente
 // ---------------------------------------------------------------------
 async function runManualDownloadSimulado(params = {}) {
   const { onLog } = params || {};
@@ -765,7 +971,7 @@ async function runManualDownloadSimulado(params = {}) {
     modoExecucao,
     jobDir,
 
-    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    // âœ… AJUSTE: usuÃ¡rio para histÃ³rico (multiusuÃ¡rio)
     usuarioEmail,
     usuarioNome,
   } = params;
@@ -780,18 +986,18 @@ async function runManualDownloadSimulado(params = {}) {
   const finalDir = getTipoDirFromRoot(rootJobDir, tipoNota);
 
   pushLog(
-    `[BOT] (Debug) Modo SIMULAÇÃO ativo. NFSE_USE_PORTAL = "${
-      process.env.NFSE_USE_PORTAL || "não definido"
+    `[BOT] (Debug) Modo SIMULAÃ‡ÃƒO ativo. NFSE_USE_PORTAL = "${
+      process.env.NFSE_USE_PORTAL || "nÃ£o definido"
     }".`
   );
-  pushLog("[BOT] Iniciando robô (SIMULAÇÃO)...");
+  pushLog("[BOT] Iniciando robÃ´ (SIMULAÃ‡ÃƒO)...");
   pushLog(`[BOT] Tipo de nota: ${tipoNota}`);
-  pushLog(`[BOT] Período: ${periodoLabel}`);
+  pushLog(`[BOT] PerÃ­odo: ${periodoLabel}`);
   pushLog(`[BOT] Pasta final: ${finalDir}`);
 
   try {
     registrarExecucao({
-      // ✅ AJUSTE: salvar usuário no histórico
+      // âœ… AJUSTE: salvar usuÃ¡rio no histÃ³rico
       usuarioEmail: usuarioEmail || null,
       usuarioNome: usuarioNome || null,
 
@@ -800,10 +1006,10 @@ async function runManualDownloadSimulado(params = {}) {
       tipo: modoExecucao || "manual",
       totalArquivos: 0,
       status: "simulado",
-      detalhes: `Simulação - tipoNota=${tipoNota}, período=${periodoLabel}.`,
+      detalhes: `SimulaÃ§Ã£o - tipoNota=${tipoNota}, perÃ­odo=${periodoLabel}.`,
     });
   } catch (err) {
-    console.error("[BOT] Erro ao registrar histórico (simulação):", err);
+    console.error("[BOT] Erro ao registrar histÃ³rico (simulaÃ§Ã£o):", err);
   }
 
   return { logs, paths: { jobDir: rootJobDir, finalDir } };
@@ -811,7 +1017,7 @@ async function runManualDownloadSimulado(params = {}) {
 
 // ---------------------------------------------------------------------
 // MODO PORTAL (Playwright)
-// ✅ AJUSTE: só cria a pasta (Emitidas/Recebidas/Canceladas) se houver download real
+// âœ… AJUSTE: sÃ³ cria a pasta (Emitidas/Recebidas/Canceladas) se houver download real
 // ---------------------------------------------------------------------
 async function runManualDownloadPortal(params = {}) {
   const { onLog } = params || {};
@@ -831,18 +1037,28 @@ async function runManualDownloadPortal(params = {}) {
     modoExecucao,
     jobDir,
 
-    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    // âœ… AJUSTE: usuÃ¡rio para histÃ³rico (multiusuÃ¡rio)
     usuarioEmail,
     usuarioNome,
   } = params;
 
   const periodoLabel = buildPeriodoLabel(dataInicial, dataFinal);
 
+  const certCfg = resolveA1CertConfig(params, pushLog);
+  const certRequested =
+    params?.usarCertificadoA1 === true ||
+    String(params?.authType || "").toLowerCase().includes("certificado");
   const login = loginParam || process.env.NFSE_USER;
   const senha = senhaParam || process.env.NFSE_PASSWORD;
+  const hasCreds = !!(login && senha);
+  const useA1 = !!certCfg;
 
-  if (!login || !senha) {
-    pushLog("[BOT] Login/senha não informados. Voltando para SIMULAÇÃO.");
+  if (certRequested && !useA1 && !hasCreds) {
+    throw new Error("Modo certificado A1 selecionado, mas certificado invÃ¡lido/ausente. Verifique arquivo e senha do certificado.");
+  }
+
+  if (!hasCreds && !useA1) {
+    pushLog("[BOT] Login/senha nÃ£o informados e sem certificado A1. Voltando para SIMULAÃ‡ÃƒO.");
     const simResult = await runManualDownloadSimulado({ ...params, modoExecucao, onLog });
     return { logs: logs.concat(simResult.logs), paths: simResult.paths };
   }
@@ -852,15 +1068,18 @@ async function runManualDownloadPortal(params = {}) {
   const rootJobDir = jobDir ? path.resolve(process.cwd(), jobDir) : jobPaths.jobDir;
   ensureDir(rootJobDir);
 
-  // ✅ NÃO cria as 3 pastas aqui.
-  // Só define qual seria a pasta final (e cria quando realmente salvar algum arquivo).
+  // âœ… NÃƒO cria as 3 pastas aqui.
+  // SÃ³ define qual seria a pasta final (e cria quando realmente salvar algum arquivo).
   const finalDir = getTipoDirFromRoot(rootJobDir, tipoNota);
 
   pushLog(`[BOT] JobDir: ${rootJobDir}`);
   pushLog(`[BOT] Tipo: ${tipoNota} | Pasta final: ${finalDir}`);
 
   const browser = await launchNFSEBrowser();
-  const context = await browser.newContext({ acceptDownloads: true });
+  const context = await browser.newContext({
+    acceptDownloads: true,
+    ...(useA1 ? { clientCertificates: certCfg.clientCertificates } : {}),
+  });
   const page = await context.newPage();
 
   const arquivoIndexRef = { value: 0 };
@@ -870,27 +1089,103 @@ async function runManualDownloadPortal(params = {}) {
     // 1) Abrir login
     pushLog("[BOT] Abrindo portal nacional da NFS-e...");
     await page.goto(NFSE_PORTAL_URL, { waitUntil: "domcontentloaded" });
-    pushLog("[BOT] Página de login carregada.");
+    pushLog("[BOT] PÃ¡gina de login carregada.");
 
-    // 2) Login
-    await page.fill('input[name="Login"], input[id="Login"], input[type="text"]', login);
-    pushLog("[BOT] Login preenchido.");
+    // 2) Login (ou certificado A1 quando nÃ£o hÃ¡ login/senha)
+    if (hasCreds) {
+      await page.fill('input[name="Login"], input[id="Login"], input[type="text"]', login);
+      pushLog("[BOT] Login preenchido.");
 
-    await page.fill('input[name="Senha"], input[id="Senha"], input[type="password"]', senha);
-    pushLog("[BOT] Senha preenchida.");
+      await page.fill('input[name="Senha"], input[id="Senha"], input[type="password"]', senha);
+      pushLog("[BOT] Senha preenchida.");
 
-    await page.click(
-      'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")'
-    );
-    pushLog("[BOT] Botão de login clicado. Aguardando...");
+      await page.click(
+        'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")'
+      );
+      pushLog("[BOT] BotÃ£o de login clicado. Aguardando...");
+    } else if (useA1) {
+      pushLog(`[BOT] Modo Certificado A1 ativo (PFX: ${certCfg.pfxPath}). Tentando autenticar por certificado...`);
+
+      const certSelectors = [
+        'a[href*="/EmissorNacional/Certificado"]',
+        'a[href*="/Certificado"]',
+        'a.img-certificado',
+        'a:has-text("Acesso via certificado digital")',
+      ];
+
+      let certClicked = false;
+      for (const sel of certSelectors) {
+        const link = page.locator(sel).first();
+        const exists = await link.count().catch(() => 0);
+        if (!exists) continue;
+
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null),
+          link.click({ timeout: 5000 }),
+        ]).catch(() => null);
+
+        certClicked = true;
+        pushLog(`[BOT] Clique no acesso por certificado realizado (${sel}).`);
+        break;
+      }
+
+      if (!certClicked) {
+        const certUrl = new URL('/EmissorNacional/Certificado', page.url()).toString();
+        pushLog(`[BOT] Link de certificado nao encontrado na tela. Tentando URL direta: ${certUrl}`);
+        await page.goto(certUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+      }
+    }
 
     await Promise.race([
       page.waitForNavigation({ waitUntil: "networkidle", timeout: 15000 }),
       page.waitForTimeout(15000),
     ]).catch(() => {});
 
-    // ✅ AJUSTE MÍNIMO #2: se ainda estiver no Login, salva evidências e aborta (pra não gerar ZIP vazio)
-    if (page.url().includes("/Login")) {
+    const isStillOnLogin = () => /\/Login(\?|$)/i.test(page.url());
+
+    if (useA1 && isStillOnLogin()) {
+      pushLog("[BOT] A1 ainda na tela de login apos 1a tentativa. Executando retentativa automatica...");
+      const certSelectorsRetry = [
+        'a[href*="/EmissorNacional/Certificado"]',
+        'a[href*="/Certificado"]',
+        "a.img-certificado",
+        'a:has-text("Acesso via certificado digital")',
+      ];
+
+      for (let tentativa = 1; tentativa <= 2; tentativa++) {
+        let clicked = false;
+        for (const sel of certSelectorsRetry) {
+          const link = page.locator(sel).first();
+          const exists = await link.count().catch(() => 0);
+          if (!exists) continue;
+          await link.click({ timeout: 5000 }).catch(() => {});
+          clicked = true;
+          pushLog(`[BOT] Retentativa A1 #${tentativa}: clique no acesso por certificado (${sel}).`);
+          break;
+        }
+
+        if (!clicked) {
+          const certUrlRetry = new URL("/EmissorNacional/Certificado", page.url()).toString();
+          pushLog(
+            `[BOT] Retentativa A1 #${tentativa}: link nao encontrado. Tentando URL direta: ${certUrlRetry}`
+          );
+          await page.goto(certUrlRetry, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+        }
+
+        await Promise.race([
+          page.waitForURL((url) => !/\/Login(\?|$)/i.test(url.toString()), { timeout: 25000 }),
+          page.waitForTimeout(25000),
+        ]).catch(() => {});
+
+        if (!isStillOnLogin()) {
+          pushLog(`[BOT] Retentativa A1 #${tentativa}: autenticacao concluida.`);
+          break;
+        }
+      }
+    }
+
+    // âœ… AJUSTE MÃNIMO #2: se ainda estiver no Login, salva evidÃªncias e aborta (pra nÃ£o gerar ZIP vazio)
+    if (isStillOnLogin()) {
       pushLog("[BOT] (Alerta) Ainda na tela de login. Vou salvar debug e abortar.");
 
       try {
@@ -908,9 +1203,7 @@ async function runManualDownloadPortal(params = {}) {
         pushLog(`[BOT] Debug salvo: ${html}`);
       } catch {}
 
-      throw new Error(
-        "Não autenticou no portal (permaneceu em /Login). Verifique o print/HTML em _debug."
-      );
+      throw new Error(useA1 ? "NÃ£o autenticou com certificado A1 (permaneceu em /Login). Verifique PFX/senha e debug." : "NÃ£o autenticou no portal (permaneceu em /Login). Verifique o print/HTML em _debug.");
     } else {
       pushLog("[BOT] Login OK (URL mudou).");
     }
@@ -921,7 +1214,7 @@ async function runManualDownloadPortal(params = {}) {
     // 4) Filtro de data
     const { usarFiltroNaTabela } = await applyDateFilterIfExists(page, dataInicial, dataFinal, pushLog);
 
-    // ✅ Situação/Status:
+    // âœ… SituaÃ§Ã£o/Status:
     // - canceladas: usado para INCLUIR somente canceladas
     // - emitidas: usado para EXCLUIR canceladas do meio
     let situacaoIdx = -1;
@@ -930,52 +1223,58 @@ async function runManualDownloadPortal(params = {}) {
       situacaoIdx = await findSituacaoColumnIndex(page);
       if (situacaoIdx < 0) {
         pushLog(
-          '[BOT] ⚠️ Não encontrei coluna "Situação/Status". Para evitar erro, canceladas ficará vazio nesta execução.'
+          '[BOT] âš ï¸ NÃ£o encontrei coluna "SituaÃ§Ã£o/Status". Para evitar erro, canceladas ficarÃ¡ vazio nesta execuÃ§Ã£o.'
         );
       } else {
-        pushLog(`[BOT] Coluna Situação/Status detectada (idx=${situacaoIdx}).`);
+        pushLog(`[BOT] Coluna SituaÃ§Ã£o/Status detectada (idx=${situacaoIdx}).`);
       }
     }
 
-    // ✅ NOVO (sem quebrar nada): em "emitidas", pula linhas canceladas
+    // âœ… NOVO (sem quebrar nada): em "emitidas", pula linhas canceladas
     let situacaoIdxEmitidas = -1;
     if (tipoNota === "emitidas") {
       situacaoIdxEmitidas = await findSituacaoColumnIndex(page);
       if (situacaoIdxEmitidas >= 0) {
         pushLog(
-          `[BOT] Coluna Situação/Status detectada para filtro de emitidas (idx=${situacaoIdxEmitidas}). Canceladas serão ignoradas em Emitidas.`
+          `[BOT] Coluna SituaÃ§Ã£o/Status detectada para filtro de emitidas (idx=${situacaoIdxEmitidas}). Canceladas serÃ£o ignoradas em Emitidas.`
         );
       } else {
         pushLog(
-          `[BOT] (Info) Não encontrei coluna Situação/Status para filtro de emitidas. Seguindo sem filtrar canceladas em Emitidas.`
+          `[BOT] (Info) NÃ£o encontrei coluna SituaÃ§Ã£o/Status para filtro de emitidas. Seguindo sem filtrar canceladas em Emitidas.`
         );
       }
     }
 
-    // 5) Validar “nenhum registro”
+    // 5) Validar â€œnenhum registroâ€
     const textoPagina = (await page.textContent("body").catch(() => "")) || "";
     if (textoPagina.includes("Nenhum registro encontrado")) {
       pushLog("[BOT] Nenhuma nota encontrada (Nenhum registro encontrado).");
-      pushLog(`[BOT] Página atual validada: ${page.url()}`);
+      pushLog(`[BOT] PÃ¡gina atual validada: ${page.url()}`);
     } else {
-      // ✅ AJUSTE MÍNIMO #3: aumentar timeout da tabela
-      await page.waitForSelector("table tbody tr", { timeout: 30000 });
-
-      const rowHandles = await page.$$("table tbody tr");
-      const rowCount = rowHandles.length;
-
-      pushLog(`[BOT] Tabela carregada. Linhas: ${rowCount}.`);
-
       const dataInicialDate = dataInicial ? parseIsoToDate(dataInicial) : null;
       const dataFinalDate = dataFinal ? parseIsoToDate(dataFinal) : null;
 
-      if (rowCount === 0) {
-        pushLog("[BOT] Nenhuma nota na tabela para o período.");
+      if (!baixarXml && !baixarPdf) {
+        pushLog("[BOT] Nenhum formato selecionado (XML/PDF). Nada serÃ¡ baixado.");
       } else {
-        if (!baixarXml && !baixarPdf) {
-          pushLog("[BOT] Nenhum formato selecionado (XML/PDF). Nada será baixado.");
-        } else {
-          let linhaIndex = 0;
+        let linhaIndex = 0;
+        let paginaAtual = 1;
+
+        while (true) {
+          await page.waitForSelector("table tbody tr", { timeout: 30000 }).catch(() => {});
+          const rowHandles = await page.$$("table tbody tr");
+          const rowCount = rowHandles.length;
+
+          pushLog(
+            paginaAtual === 1
+              ? `[BOT] Tabela carregada. Linhas: ${rowCount}.`
+              : `[BOT] Tabela carregada (pÃ¡gina ${paginaAtual}). Linhas: ${rowCount}.`
+          );
+
+          if (rowCount === 0) {
+            if (paginaAtual === 1) pushLog("[BOT] Nenhuma nota na tabela para o perÃ­odo.");
+            break;
+          }
 
           for (const row of rowHandles) {
             linhaIndex += 1;
@@ -983,7 +1282,7 @@ async function runManualDownloadPortal(params = {}) {
             try {
               const allCells = await row.$$("td");
 
-              // fallback por coluna Emissão
+              // fallback por coluna EmissÃ£o
               if (usarFiltroNaTabela && (dataInicialDate || dataFinalDate)) {
                 const emissaoCell = allCells[0] || null;
                 let emissaoTexto = "";
@@ -1000,21 +1299,21 @@ async function runManualDownloadPortal(params = {}) {
                     (dataFinalDate && emissaoDate > dataFinalDate)
                   ) {
                     pushLog(
-                      `[BOT] Linha ${linhaIndex}: emissão ${emissaoTexto} fora do período. Ignorando.`
+                      `[BOT] Linha ${linhaIndex}: emissÃ£o ${emissaoTexto} fora do perÃ­odo. Ignorando.`
                     );
                     continue;
                   }
                 }
               }
 
-              // ✅ CANCELADAS: filtra pela coluna Situação/Status (ícone/tooltip)
+              // âœ… CANCELADAS: filtra pela coluna SituaÃ§Ã£o/Status (Ã­cone/tooltip)
               if (tipoNota === "canceladas") {
                 if (situacaoIdx < 0) continue;
 
                 const r = await isRowCanceladaBySituacaoIdx(row, situacaoIdx);
 
                 pushLog(
-                  `[BOT] Linha ${linhaIndex}: Situação="${r.statusNorm || "?"}" (raw="${
+                  `[BOT] Linha ${linhaIndex}: SituaÃ§Ã£o="${r.statusNorm || "?"}" (raw="${
                     r.statusRaw || ""
                   }")`
                 );
@@ -1024,12 +1323,12 @@ async function runManualDownloadPortal(params = {}) {
                 pushLog(`[BOT] Linha ${linhaIndex}: nota CANCELADA detectada. Processando...`);
               }
 
-              // ✅ EMITIDAS: ignorar canceladas no meio
+              // âœ… EMITIDAS: ignorar canceladas no meio
               if (tipoNota === "emitidas" && situacaoIdxEmitidas >= 0) {
                 const rEmi = await isRowCanceladaBySituacaoIdx(row, situacaoIdxEmitidas);
                 if (rEmi.isCancelled) {
                   pushLog(
-                    `[BOT] Linha ${linhaIndex}: (Emitidas) nota CANCELADA detectada na lista. Ignorando para não misturar.`
+                    `[BOT] Linha ${linhaIndex}: (Emitidas) nota CANCELADA detectada na lista. Ignorando para nÃ£o misturar.`
                   );
                   continue;
                 }
@@ -1038,28 +1337,34 @@ async function runManualDownloadPortal(params = {}) {
               const acaoCell = allCells.length > 0 ? allCells[allCells.length - 1] : null;
 
               if (!acaoCell) {
-                pushLog(`[BOT] Linha ${linhaIndex}: não encontrei coluna de ações.`);
+                pushLog(`[BOT] Linha ${linhaIndex}: nÃ£o encontrei coluna de aÃ§Ãµes.`);
                 continue;
               }
 
               const menuWrapper = (await acaoCell.$(".menu-suspenso-tabela")) || acaoCell;
-              const trigger = await menuWrapper.$(".icone-trigger");
-              if (!trigger) {
-                pushLog(
-                  `[BOT] Linha ${linhaIndex}: não encontrei o ícone do menu (.icone-trigger).`
-                );
-                continue;
-              }
-
-              await trigger.click({ force: true });
-              await page.waitForTimeout(200);
-
-              const menu =
+              let menu =
                 (await menuWrapper.$(".menu-content")) || (await menuWrapper.$(".list-group"));
-              if (!menu) {
-                pushLog(`[BOT] Linha ${linhaIndex}: menu suspenso não encontrado após clique.`);
-                continue;
-              }
+              let menuOpened = false;
+              const ensureMenu = async () => {
+                if (menuOpened && menu) return true;
+                const trigger = await menuWrapper.$(".icone-trigger");
+                if (!trigger) {
+                  pushLog(
+                    `[BOT] Linha ${linhaIndex}: nÃ£o encontrei o Ã­cone do menu (.icone-trigger).`
+                  );
+                  return false;
+                }
+                await trigger.click({ force: true });
+                menuOpened = true;
+                await page.waitForTimeout(20);
+                menu =
+                  (await menuWrapper.$(".menu-content")) || (await menuWrapper.$(".list-group"));
+                if (!menu) {
+                  pushLog(`[BOT] Linha ${linhaIndex}: menu suspenso nÃ£o encontrado apÃ³s clique.`);
+                  return false;
+                }
+                return true;
+              };
 
               // XML
               if (baixarXml) {
@@ -1068,6 +1373,17 @@ async function runManualDownloadPortal(params = {}) {
                   (await menu.$('a:has-text("XML")')) ||
                   (await menu.$('a[href*="DownloadXml"]')) ||
                   (await menu.$('a[href*="xml"]'));
+
+                if (!xmlLink) {
+                  const menuOk = await ensureMenu();
+                  if (menuOk) {
+                    xmlLink =
+                      (await menu.$('a:has-text("Download XML")')) ||
+                      (await menu.$('a:has-text("XML")')) ||
+                      (await menu.$('a[href*="DownloadXml"]')) ||
+                      (await menu.$('a[href*="xml"]'));
+                  }
+                }
 
                 if (xmlLink) {
                   pushLog(`[BOT] Linha ${linhaIndex}: baixando XML...`);
@@ -1082,7 +1398,7 @@ async function runManualDownloadPortal(params = {}) {
                     linhaIndex,
                   });
                 } else {
-                  pushLog(`[BOT] Linha ${linhaIndex}: XML não encontrado no menu.`);
+                  pushLog(`[BOT] Linha ${linhaIndex}: XML nÃ£o encontrado no menu.`);
                 }
               }
 
@@ -1096,6 +1412,20 @@ async function runManualDownloadPortal(params = {}) {
                   (await menu.$('a:has-text("PDF")')) ||
                   (await menu.$('a[href*="DANFS"]')) ||
                   (await menu.$('a[href*="pdf"]'));
+
+                if (!pdfLink) {
+                  const menuOk = await ensureMenu();
+                  if (menuOk) {
+                    pdfLink =
+                      (await menu.$('a:has-text("Download DANFS-e")')) ||
+                      (await menu.$('a:has-text("Download DANFS")')) ||
+                      (await menu.$('a:has-text("DANFS-e")')) ||
+                      (await menu.$('a:has-text("DANFS")')) ||
+                      (await menu.$('a:has-text("PDF")')) ||
+                      (await menu.$('a[href*="DANFS"]')) ||
+                      (await menu.$('a[href*="pdf"]'));
+                  }
+                }
 
                 if (pdfLink) {
                   pushLog(`[BOT] Linha ${linhaIndex}: baixando PDF...`);
@@ -1111,16 +1441,44 @@ async function runManualDownloadPortal(params = {}) {
                   const destinoPdf = path.join(finalDir, destinoPdfPreview);
 
                   try {
-                    const ok = await baixarPdfRobusto({
-                      context,
-                      page,
-                      destinoPdf,
-                      log: (m) => pushLog(m),
-                      pdfLinkHandle: pdfLink,
-                      clickPdfOption: async () => {
-                        await safeClickHandle(pdfLink);
-                      },
-                    });
+                    // Fast-path: tenta request autenticado direto quando o href do DANFS/PDF estiver disponivel.
+                    let ok = false;
+                    let hrefDireto = null;
+                    try {
+                      hrefDireto = await pdfLink.getAttribute("href");
+                    } catch {}
+
+                    if (hrefDireto && /download|danfs|pdf/i.test(hrefDireto)) {
+                      try {
+                        ok = await baixarPdfPorRequest({
+                          context,
+                          page,
+                          urlPdf: hrefDireto,
+                          destinoPdf,
+                          log: (m) => pushLog(m),
+                        });
+                        if (ok) {
+                          pushLog(`[BOT] Linha ${linhaIndex}: PDF obtido por fast-path (request autenticado).`);
+                        }
+                      } catch (fastErr) {
+                        pushLog(
+                          `[BOT] Linha ${linhaIndex}: fast-path PDF falhou (${fastErr.message}). Tentando modo robusto...`
+                        );
+                      }
+                    }
+
+                    if (!ok) {
+                      ok = await baixarPdfRobusto({
+                        context,
+                        page,
+                        destinoPdf,
+                        log: (m) => pushLog(m),
+                        pdfLinkHandle: pdfLink,
+                        clickPdfOption: async () => {
+                          await safeClickHandle(pdfLink);
+                        },
+                      });
+                    }
 
                     if (ok) {
                       arquivoIndexRef.value += 1;
@@ -1130,22 +1488,26 @@ async function runManualDownloadPortal(params = {}) {
                     pushLog(`[BOT] Erro ao capturar PDF na linha ${linhaIndex}: ${e.message}`);
                   }
                 } else {
-                  pushLog(`[BOT] Linha ${linhaIndex}: PDF/DANFS não encontrado no menu.`);
+                  pushLog(`[BOT] Linha ${linhaIndex}: PDF/DANFS nÃ£o encontrado no menu.`);
                 }
               }
 
-              await page.waitForTimeout(150);
+              await page.waitForTimeout(5);
             } catch (linhaErr) {
               pushLog(`[BOT] Erro ao processar linha ${linhaIndex}: ${linhaErr.message}`);
             }
           }
+
+          const avancouPagina = await goToNextTablePage(page, pushLog, paginaAtual);
+          if (!avancouPagina) break;
+          paginaAtual += 1;
         }
       }
     }
 
     pushLog(`[BOT] Finalizado (${tipoNota}). Total capturado: ${arquivoIndexRef.value}.`);
   } catch (err) {
-    console.error("Erro no robô Playwright:", err);
+    console.error("Erro no robÃ´ Playwright:", err);
     pushLog(`[BOT] ERRO: ${err.message}`);
     teveErro = true;
   } finally {
@@ -1154,7 +1516,7 @@ async function runManualDownloadPortal(params = {}) {
 
     try {
       registrarExecucao({
-        // ✅ AJUSTE: salvar usuário no histórico
+        // âœ… AJUSTE: salvar usuÃ¡rio no histÃ³rico
         usuarioEmail: usuarioEmail || null,
         usuarioNome: usuarioNome || null,
 
@@ -1163,11 +1525,11 @@ async function runManualDownloadPortal(params = {}) {
         tipo: modoExecucao || "manual",
         totalArquivos: arquivoIndexRef.value,
         status: teveErro ? "erro" : "sucesso",
-        erros: teveErro ? [{ message: "Verificar logs desta execução" }] : null,
-        detalhes: `Portal nacional - tipoNota=${tipoNota}, período=${periodoLabel}.`,
+        erros: teveErro ? [{ message: "Verificar logs desta execuÃ§Ã£o" }] : null,
+        detalhes: `Portal nacional - tipoNota=${tipoNota}, perÃ­odo=${periodoLabel}.`,
       });
     } catch (histErr) {
-      console.error("[BOT] Erro ao registrar histórico:", histErr);
+      console.error("[BOT] Erro ao registrar histÃ³rico:", histErr);
     }
   }
 
@@ -1175,7 +1537,7 @@ async function runManualDownloadPortal(params = {}) {
 }
 
 // ---------------------------------------------------------------------
-// Função usada pelo backend – escolhe modo conforme .env
+// FunÃ§Ã£o usada pelo backend â€“ escolhe modo conforme .env
 // ---------------------------------------------------------------------
 export async function runManualDownload(params = {}) {
   const usePortal = process.env.NFSE_USE_PORTAL === "true";
@@ -1188,9 +1550,9 @@ export async function runManualDownload(params = {}) {
 }
 
 // ---------------------------------------------------------------------
-// Execução em LOTE
+// ExecuÃ§Ã£o em LOTE
 // Agora aceita processarTipos: ["emitidas","recebidas","canceladas"]
-// ✅ AJUSTE: dentro de cada empresa, só cria pasta do(s) tipo(s) realmente executado(s) e que baixou arquivo
+// âœ… AJUSTE: dentro de cada empresa, sÃ³ cria pasta do(s) tipo(s) realmente executado(s) e que baixou arquivo
 // ---------------------------------------------------------------------
 export async function runLoteDownload(empresas = [], options = {}) {
   const {
@@ -1203,7 +1565,7 @@ export async function runLoteDownload(empresas = [], options = {}) {
     pastaDestino,
     processarTipos,
 
-    // ✅ AJUSTE: usuário para histórico (multiusuário)
+    // âœ… AJUSTE: usuÃ¡rio para histÃ³rico (multiusuÃ¡rio)
     usuarioEmail,
     usuarioNome,
   } = options || {};
@@ -1211,14 +1573,14 @@ export async function runLoteDownload(empresas = [], options = {}) {
   const { logs, pushLog } = createLogger(onLog);
   const usePortal = process.env.NFSE_USE_PORTAL === "true";
 
-  // ✅ Ajuste: normaliza + remove duplicados
+  // âœ… Ajuste: normaliza + remove duplicados
   const tiposRaw =
     Array.isArray(processarTipos) && processarTipos.length ? processarTipos : [tipoNota];
   const tipos = [...new Set(tiposRaw.map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
 
-  pushLog(`[BOT] Iniciando execução em lote (${usePortal ? "REAL (portal)" : "SIMULAÇÃO"})...`);
+  pushLog(`[BOT] Iniciando execuÃ§Ã£o em lote (${usePortal ? "REAL (portal)" : "SIMULAÃ‡ÃƒO"})...`);
   pushLog(`[BOT] Tipos no lote: ${tipos.join(", ")}`);
-  pushLog(`[BOT] Período: ${buildPeriodoLabel(dataInicial, dataFinal)}`);
+  pushLog(`[BOT] PerÃ­odo: ${buildPeriodoLabel(dataInicial, dataFinal)}`);
 
   if (!Array.isArray(empresas) || empresas.length === 0) {
     pushLog("[BOT] Nenhuma empresa cadastrada para executar em lote.");
@@ -1234,13 +1596,16 @@ export async function runLoteDownload(empresas = [], options = {}) {
 
     const login = emp.loginPortal || emp.cnpj || null;
     const senha = emp.senhaPortal || null;
+    const authType = String(emp.authType || "");
+    const isCert = authType.toLowerCase().includes("certificado");
+    const hasCreds = !!(login && senha);
 
-    if (usePortal && (!login || !senha)) {
-      pushLog("[BOT] Login/senha da empresa não configurados. Pulando.");
+    if (usePortal && !hasCreds && !isCert) {
+      pushLog("[BOT] Login/senha da empresa nÃ£o configurados. Pulando.");
       continue;
     }
 
-    // ✅ Só cria a pasta da empresa (não cria Emitidas/Recebidas/Canceladas aqui)
+    // âœ… SÃ³ cria a pasta da empresa (nÃ£o cria Emitidas/Recebidas/Canceladas aqui)
     const empresaDir = path.join(
       loteJobPaths.jobDir,
       `${String(emp.nome || "empresa").replace(/[^\w\-]+/g, "_")}_${String(
@@ -1260,13 +1625,17 @@ export async function runLoteDownload(empresas = [], options = {}) {
           pastaDestino,
           login,
           senha,
+          authType,
+          usarCertificadoA1: isCert,
+          certPfxPath: emp.certPfxPath || emp.pfxPath || null,
+          certPassphrase: emp.certPassphrase || emp.passphrase || null,
           empresaId: emp.id || emp.cnpj,
           empresaNome: emp.nome,
           modoExecucao: "lote",
           onLog: (msg) => pushLog(msg),
           jobDir: empresaDir,
 
-          // ✅ AJUSTE: repassa usuário para histórico
+          // âœ… AJUSTE: repassa usuÃ¡rio para histÃ³rico
           usuarioEmail: usuarioEmail || null,
           usuarioNome: usuarioNome || null,
         });
@@ -1284,7 +1653,7 @@ export async function runLoteDownload(empresas = [], options = {}) {
           onLog: (msg) => pushLog(msg),
           jobDir: empresaDir,
 
-          // ✅ AJUSTE: repassa usuário para histórico
+          // âœ… AJUSTE: repassa usuÃ¡rio para histÃ³rico
           usuarioEmail: usuarioEmail || null,
           usuarioNome: usuarioNome || null,
         });
@@ -1293,7 +1662,9 @@ export async function runLoteDownload(empresas = [], options = {}) {
   }
 
   pushLog("--------------------------------------------------------------");
-  pushLog(`[BOT] Execução em lote finalizada.`);
+  pushLog(`[BOT] ExecuÃ§Ã£o em lote finalizada.`);
 
   return { logs, paths: { jobDir: loteJobPaths.jobDir } };
 }
+
+

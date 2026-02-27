@@ -37,7 +37,7 @@ export function getSessionUserFromToken(token) {
   if (!sess) return null;
 
   const user = db
-    .prepare(`SELECT id, name, email, role, is_active, last_login_at FROM users WHERE id = ?`)
+    .prepare(`SELECT id, name, email, role, owner_admin_id, is_active, last_login_at, company_name, cnpj, whatsapp, plan, plan_value, created_at FROM users WHERE id = ?`)
     .get(sess.user_id);
 
   if (!user || !user.is_active) return null;

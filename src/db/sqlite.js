@@ -61,8 +61,15 @@ export function ensureAuthTables() {
       name TEXT,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      password_plain TEXT,
+      owner_admin_id INTEGER,
       role TEXT NOT NULL DEFAULT 'USER',     -- 'ADMIN' | 'USER'
       is_active INTEGER NOT NULL DEFAULT 1,  -- 1 ativo, 0 inativo
+      company_name TEXT,
+      cnpj TEXT,
+      whatsapp TEXT,
+      plan TEXT NOT NULL DEFAULT 'ESSENCIAL',
+      plan_value REAL NOT NULL DEFAULT 49.9,
       created_at TEXT NOT NULL,
       last_login_at TEXT
     );
@@ -97,8 +104,8 @@ export function ensureSeedAdmins({ bcryptHashFn }) {
 
   const getByEmail = db.prepare(`SELECT id, email, role FROM users WHERE email = ?`);
   const insertUser = db.prepare(`
-    INSERT INTO users (name, email, password_hash, role, is_active, created_at)
-    VALUES (?, ?, ?, ?, 1, ?)
+    INSERT INTO users (name, email, password_hash, password_plain, role, is_active, created_at, owner_admin_id)
+    VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
   `);
 
   const admins = [
@@ -117,7 +124,8 @@ export function ensureSeedAdmins({ bcryptHashFn }) {
 
       const hash = bcryptHashFn(tempPass);
 
-      insertUser.run(a.name, a.email, hash, a.role, now);
+      const info = insertUser.run(a.name, a.email, hash, tempPass, a.role, now);
+      db.prepare(`UPDATE users SET owner_admin_id = id WHERE id = ?`).run(info.lastInsertRowid);
 
       created.push({ email: a.email, tempPass });
     } else {
@@ -147,8 +155,15 @@ db.exec(`
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    password_plain TEXT,
+    owner_admin_id INTEGER,
     role TEXT NOT NULL DEFAULT 'USER',
     is_active INTEGER NOT NULL DEFAULT 1,
+    company_name TEXT,
+    cnpj TEXT,
+    whatsapp TEXT,
+    plan TEXT NOT NULL DEFAULT 'ESSENCIAL',
+    plan_value REAL NOT NULL DEFAULT 49.9,
     last_login_at TEXT,
     created_at TEXT NOT NULL
   );
@@ -169,4 +184,43 @@ try {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at);`);
+} catch {}
+
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN company_name TEXT;`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN cnpj TEXT;`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN whatsapp TEXT;`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'ESSENCIAL';`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN plan_value REAL NOT NULL DEFAULT 49.9;`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN password_plain TEXT;`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN owner_admin_id INTEGER;`);
+} catch {}
+
+// Normaliza escopo administrativo (multi-tenant de admins):
+// - Admin sem owner_admin_id vira dono dele mesmo
+// - Usuários sem owner_admin_id herdam o admin raiz (JVR) ou o primeiro admin existente
+try {
+  db.prepare(`UPDATE users SET owner_admin_id = id WHERE upper(trim(role)) = 'ADMIN' AND owner_admin_id IS NULL`).run();
+  const rootAdmin =
+    db.prepare(`SELECT id FROM users WHERE lower(trim(email)) = lower(trim(?)) LIMIT 1`).get("jussilene.valim@gmail.com") ||
+    db.prepare(`SELECT id FROM users WHERE upper(trim(role)) = 'ADMIN' ORDER BY id ASC LIMIT 1`).get();
+  if (rootAdmin?.id) {
+    db.prepare(`
+      UPDATE users
+      SET owner_admin_id = ?
+      WHERE (upper(trim(role)) <> 'ADMIN' OR role IS NULL) AND owner_admin_id IS NULL
+    `).run(rootAdmin.id);
+  }
 } catch {}

@@ -1,25 +1,100 @@
-// public/js/dashboard.js
+﻿// public/js/dashboard.js
 
-// ---------------------------
-// Proteção básica + usuário
-// ---------------------------
-const rawUser = localStorage.getItem("nfseUser");
-
-if (!rawUser) {
-  window.location.href = "/index.html";
+// =======================================================
+// 0) Helpers básicos
+// =======================================================
+function escapeHtml(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
+function $(id) {
+  return document.getElementById(id);
+}
+
+function pickElByIds(ids = []) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) return el;
+  }
+  return null;
+}
+
+function getValByIds(ids = [], fallback = "") {
+  const el = pickElByIds(ids);
+  if (!el) return fallback;
+  return (el.value ?? "").toString();
+}
+
+function setText(el, text) {
+  if (el) el.textContent = text;
+}
+
+function isLocalhostHost() {
+  const h = String(window.location.hostname || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+// =======================================================
+// 1) Sessão/Usuário: garante que tem usuário logado
+//    - se não tiver localStorage, tenta /auth/me
+// =======================================================
 let currentUser = {};
 
-try {
-  const parsed = JSON.parse(rawUser);
-  if (parsed && typeof parsed === "object") {
-    currentUser = parsed;
-  } else {
-    currentUser = { email: String(rawUser) };
+function readLocalUser() {
+  const rawUser = localStorage.getItem("nfseUser");
+  if (!rawUser) return null;
+
+  try {
+    const parsed = JSON.parse(rawUser);
+    if (parsed && typeof parsed === "object") return parsed;
+    return { email: String(rawUser) };
+  } catch {
+    return { email: String(rawUser) };
   }
-} catch (err) {
-  currentUser = { email: String(rawUser) };
+}
+
+async function fetchMe() {
+  try {
+    const res = await fetch("/auth/me", { credentials: "include" });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    return data?.user || null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureLoggedUserOrRedirect() {
+  // tenta local
+  const local = readLocalUser();
+  if (local && (local.email || local.name || local.displayName)) {
+    currentUser = local;
+    return true;
+  }
+
+  // tenta sessão no backend
+  const me = await fetchMe();
+  if (me && (me.email || me.name)) {
+    currentUser = {
+      email: me.email,
+      name: me.name,
+      displayName: me.name,
+      role: me.role,
+    };
+    try {
+      localStorage.setItem("nfseUser", JSON.stringify(currentUser));
+    } catch {}
+    return true;
+  }
+
+  // sem sessão: volta pro login
+  window.location.href = "/index.html";
+  return false;
 }
 
 // ✅ headers padrão (multi-tenant)
@@ -30,18 +105,13 @@ function apiHeaders(extra = {}) {
   return h;
 }
 
-// ---------------------------
-// ✅ Logout (usado só pelo menu)
-// ---------------------------
+// =======================================================
+// 2) Logout
+// =======================================================
 async function doLogout() {
   try {
-    await fetch("/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch (err) {
-    // silencioso: mesmo que falhe, limpa local e redireciona
-  }
+    await fetch("/auth/logout", { method: "POST", credentials: "include" });
+  } catch {}
 
   try {
     localStorage.removeItem("nfseUser");
@@ -50,58 +120,43 @@ async function doLogout() {
   window.location.href = "/index.html";
 }
 
-// ---------------------------
-// ✅ NOVO: menu do usuário (clicável) + modal Configurações
-// ✅ AJUSTES PEDIDOS:
-//    1) Mantém tema do modal sempre claro (sem dark:*)
-//    2) Remove duplicidade de "Sair" do topo (esconde botão do topo)
-//    3) No topo fica apenas NOME + 3 tracinhos (esconde avatar)
-//    4) Modal de Configurações em TELA CHEIA
-// ---------------------------
-const userNameDisplay = document.getElementById("userNameDisplay");
-const userAvatar = document.getElementById("userAvatar");
+// =======================================================
+// 3) Ajustes visuais pedidos (menu do usuário + modal config)
+//    (mantive sua lógica, só deixei mais estável)
+// =======================================================
+const userNameDisplay = $("userNameDisplay");
+const userAvatar = $("userAvatar");
 
-let nameToShow =
-  currentUser.displayName ||
-  currentUser.name ||
-  (currentUser.email ? currentUser.email.split("@")[0] : "Usuário");
-
-// ✅ pedido: topo apenas nome + 3 tracinhos (sem avatar bolinha)
-if (userAvatar) {
-  userAvatar.style.display = "none";
-}
-
-function escapeHtml(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-// ✅ pedido: tirar "Sair" duplicado do topo
-(function hideTopLogoutIfAny() {
-  const logoutBtnTop = document.getElementById("logoutBtn");
-  if (logoutBtnTop) {
+function hideTopLogoutIfAny() {
+  const logoutBtnTop = $("logoutBtn");
+  // Nao esconder o botao de sair quando ele pertence ao menu novo do usuario.
+  if (logoutBtnTop && !logoutBtnTop.closest("#userMenuDropdown")) {
     logoutBtnTop.style.display = "none";
   }
-})();
+}
+
+let settingsModalEl = null;
 
 function ensureUserMenuUI() {
   if (!userNameDisplay) return;
+  if ($("userMenuBtn")) return;
 
-  // ✅ guarda: evita recriar menu e re-binds
-  if (document.getElementById("userMenuBtn")) return;
+  let nameToShow =
+    currentUser.displayName ||
+    currentUser.name ||
+    (currentUser.email ? currentUser.email.split("@")[0] : "Usuário");
 
-  // container
+  // topo sem avatar
+  if (userAvatar) userAvatar.style.display = "none";
+
+  // wrapper
   const wrapper = document.createElement("div");
   wrapper.style.position = "relative";
   wrapper.style.display = "inline-flex";
   wrapper.style.alignItems = "center";
   wrapper.style.gap = "8px";
 
-  // botão
+  // btn
   const btn = document.createElement("button");
   btn.type = "button";
   btn.id = "userMenuBtn";
@@ -111,13 +166,11 @@ function ensureUserMenuUI() {
   btn.setAttribute("aria-expanded", "false");
   btn.title = "Menu do usuário";
 
-  // label
   const label = document.createElement("span");
   label.id = "userMenuLabel";
   label.className = "text-sm font-medium";
   label.textContent = nameToShow;
 
-  // ícone
   const burger = document.createElement("span");
   burger.className = "text-lg leading-none opacity-80";
   burger.textContent = "≡";
@@ -125,7 +178,7 @@ function ensureUserMenuUI() {
   btn.appendChild(label);
   btn.appendChild(burger);
 
-  // dropdown
+  // dropdown claro
   const menu = document.createElement("div");
   menu.id = "userMenuDropdown";
   menu.className =
@@ -138,25 +191,20 @@ function ensureUserMenuUI() {
       <div class="text-xs text-slate-500">${escapeHtml(currentUser.email || "")}</div>
     </div>
 
-    <button id="userMenuConfigBtn"
-      class="w-full text-left px-4 py-3 text-sm hover:bg-slate-50">
+    <button id="userMenuConfigBtn" class="w-full text-left px-4 py-3 text-sm hover:bg-slate-50">
       ⚙️ Configurações
     </button>
 
-    <button id="userMenuLogoutBtn"
-      class="w-full text-left px-4 py-3 text-sm hover:bg-slate-50">
+    <button id="userMenuLogoutBtn" class="w-full text-left px-4 py-3 text-sm hover:bg-slate-50">
       ↩️ Sair
     </button>
   `;
 
-  // coloca no lugar do texto antigo
   const parent = userNameDisplay.parentElement || userNameDisplay;
   parent.insertBefore(wrapper, userNameDisplay);
   wrapper.appendChild(btn);
 
-  // some com o antigo
   userNameDisplay.style.display = "none";
-
   wrapper.appendChild(menu);
 
   function closeMenu() {
@@ -179,12 +227,12 @@ function ensureUserMenuUI() {
     toggleMenu();
   });
 
-  // ✅ fecha ao clicar fora (bind único)
+  // fecha ao clicar fora (bind único)
   if (!document.documentElement.dataset._userMenuDocClickBound) {
     document.documentElement.dataset._userMenuDocClickBound = "1";
     document.addEventListener("click", () => {
-      const dropdown = document.getElementById("userMenuDropdown");
-      const btnNow = document.getElementById("userMenuBtn");
+      const dropdown = $("userMenuDropdown");
+      const btnNow = $("userMenuBtn");
       if (dropdown && btnNow) {
         dropdown.classList.add("hidden");
         btnNow.setAttribute("aria-expanded", "false");
@@ -206,25 +254,12 @@ function ensureUserMenuUI() {
   }
 
   if (configBtn) {
-    configBtn.addEventListener("click", (e) => {
+    configBtn.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
       closeMenu();
-      openSettingsModal();
+      await openSettingsModal();
     });
-  }
-}
-
-let settingsModalEl = null;
-
-async function fetchMeRole() {
-  try {
-    const res = await fetch("/auth/me", { credentials: "include" });
-    if (!res.ok) return null;
-    const data = await res.json().catch(() => ({}));
-    return data?.user || null;
-  } catch {
-    return null;
   }
 }
 
@@ -234,20 +269,20 @@ async function openSettingsModal() {
     return;
   }
 
-  const me = (await fetchMeRole()) || {
-    name: currentUser.name || currentUser.displayName || nameToShow,
+  const me = (await fetchMe()) || {
+    name: currentUser.name || currentUser.displayName || "Usuário",
     email: currentUser.email || "",
     role: currentUser.role || "USER",
   };
+
+  const isAdmin = false;
 
   settingsModalEl = document.createElement("div");
   settingsModalEl.id = "settingsModal";
   settingsModalEl.className =
     "fixed inset-0 z-[9999] flex items-stretch justify-stretch bg-black/50";
 
-  const isAdmin = String(me.role || "").toUpperCase() === "ADMIN";
-
-  // ✅ pedido: modal em TELA CHEIA
+  // tela cheia, sempre claro
   settingsModalEl.innerHTML = `
     <div class="w-screen h-screen max-w-none max-h-none rounded-none bg-white border border-slate-200 shadow-xl overflow-hidden flex flex-col">
       <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -381,9 +416,10 @@ async function openSettingsModal() {
 
   // close
   const closeBtn = settingsModalEl.querySelector("#settingsCloseBtn");
-  if (closeBtn) closeBtn.addEventListener("click", () => settingsModalEl.classList.add("hidden"));
+  if (closeBtn)
+    closeBtn.addEventListener("click", () => settingsModalEl.classList.add("hidden"));
 
-  // (mantém clique fora para fechar)
+  // clique fora fecha
   settingsModalEl.addEventListener("click", (e) => {
     if (e.target === settingsModalEl) settingsModalEl.classList.add("hidden");
   });
@@ -393,13 +429,15 @@ async function openSettingsModal() {
   tabBtns.forEach((b) => {
     b.addEventListener("click", () => {
       const tab = b.getAttribute("data-tab");
-      settingsModalEl.querySelectorAll(".settings-panel").forEach((p) => p.classList.add("hidden"));
+      settingsModalEl
+        .querySelectorAll(".settings-panel")
+        .forEach((p) => p.classList.add("hidden"));
       const panel = settingsModalEl.querySelector(`#settingsTab-${tab}`);
       if (panel) panel.classList.remove("hidden");
     });
   });
 
-  // ✅✅✅ AJUSTE PRINCIPAL: salvar perfil/senha SEM fallback fake/local para senha
+  // salvar
   const saveMeBtn = settingsModalEl.querySelector("#saveMeBtn");
   if (saveMeBtn) {
     saveMeBtn.addEventListener("click", async () => {
@@ -415,58 +453,54 @@ async function openSettingsModal() {
         if (msg) msg.textContent = "Preencha nome e email.";
         return;
       }
-
       if ((pass || pass2) && pass !== pass2) {
         if (msg) msg.textContent = "As senhas não conferem.";
         return;
       }
 
-      // 1) Atualiza perfil no BACKEND
+      // update profile
       try {
         const up = await fetch("/auth/update-profile", {
           method: "POST",
           credentials: "include",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, email }),
         });
-
         const upJson = await up.json().catch(() => ({}));
-
         if (!up.ok || upJson?.ok === false) {
           if (msg) msg.textContent = upJson?.message || upJson?.error || "Erro ao salvar perfil.";
           return;
         }
-      } catch (e) {
+      } catch {
         if (msg) msg.textContent = "Falha ao salvar no servidor (update-profile).";
         return;
       }
 
-      // 2) Troca senha no BACKEND (se preenchida)
+      // change password
       let changedPassword = false;
       if (pass) {
         try {
           const pw = await fetch("/auth/change-password", {
             method: "POST",
             credentials: "include",
+            cache: "no-store",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ newPassword: pass }),
           });
-
           const pwJson = await pw.json().catch(() => ({}));
-
           if (!pw.ok || pwJson?.ok === false) {
             if (msg) msg.textContent = pwJson?.message || pwJson?.error || "Erro ao alterar senha.";
             return;
           }
-
           changedPassword = true;
-        } catch (e) {
+        } catch {
           if (msg) msg.textContent = "Falha ao alterar senha no servidor (change-password).";
           return;
         }
       }
 
-      // 3) Só agora atualiza localStorage (espelha o backend)
+      // espelha no localStorage só depois do backend
       currentUser.name = name;
       currentUser.displayName = name;
       currentUser.email = email;
@@ -474,10 +508,10 @@ async function openSettingsModal() {
         localStorage.setItem("nfseUser", JSON.stringify(currentUser));
       } catch {}
 
-      const label = document.getElementById("userMenuLabel");
+      const label = $("userMenuLabel");
       if (label) label.textContent = name;
 
-      // limpa campos senha
+      // limpa senhas
       const p1 = settingsModalEl.querySelector("#mePass");
       const p2 = settingsModalEl.querySelector("#mePass2");
       if (p1) p1.value = "";
@@ -485,7 +519,6 @@ async function openSettingsModal() {
 
       if (changedPassword) {
         if (msg) msg.textContent = "Senha alterada. Faça login novamente com a nova senha...";
-        // força logout pra você testar que a senha nova realmente funciona
         setTimeout(() => doLogout(), 900);
         return;
       }
@@ -494,7 +527,6 @@ async function openSettingsModal() {
     });
   }
 
-  // admin load users
   if (isAdmin) {
     await adminLoadUsersIntoModal();
     wireAdminActions();
@@ -511,7 +543,7 @@ async function adminLoadUsersIntoModal() {
   if (msgEl) msgEl.textContent = "Carregando...";
 
   try {
-    const res = await fetch("/admin/users", { credentials: "include" });
+    const res = await fetch("/admin/users", { credentials: "include", cache: "no-store" });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
       if (msgEl) msgEl.textContent = t || "Erro ao listar usuários.";
@@ -557,7 +589,8 @@ function wireAdminActions() {
   const createBtn = settingsModalEl?.querySelector("#createUserBtn");
   const createMsg = settingsModalEl?.querySelector("#createUserMsg");
 
-  if (createBtn) {
+  if (createBtn && createBtn.dataset.bound !== "1") {
+    createBtn.dataset.bound = "1";
     createBtn.addEventListener("click", async () => {
       const name = settingsModalEl.querySelector("#newUserName")?.value?.trim() || "";
       const email = settingsModalEl.querySelector("#newUserEmail")?.value?.trim() || "";
@@ -640,21 +673,15 @@ function wireAdminActions() {
   }
 }
 
-// init menu
-ensureUserMenuUI();
-
-// ---------------------------
-// Tema claro/escuro (switch)
-// ✅ AJUSTE: agora alterna TAMBÉM a classe "dark" no <html>
-//            (pra funcionar com Tailwind dark:...)
-// ---------------------------
-const themeToggleBtn = document.getElementById("themeToggleBtn");
-const themeToggleKnob = document.getElementById("themeToggleKnob");
-const themeSunIcon = document.getElementById("themeSunIcon");
-const themeMoonIcon = document.getElementById("themeMoonIcon");
+// =======================================================
+// 4) Tema claro/escuro
+// =======================================================
+const themeToggleBtn = $("themeToggleBtn");
+const themeToggleKnob = $("themeToggleKnob");
+const themeSunIcon = $("themeSunIcon");
+const themeMoonIcon = $("themeMoonIcon");
 
 function applyThemeUI(isDark) {
-  // ✅ suporta os 2 estilos de CSS (dark-mode no body e dark no html)
   document.body.classList.toggle("dark-mode", isDark);
   document.documentElement.classList.toggle("dark", isDark);
 
@@ -682,85 +709,95 @@ function applyThemeUI(isDark) {
   }
 }
 
-(function initTheme() {
+function initTheme() {
   const savedTheme = localStorage.getItem("nfseTheme") || "light";
-  const startDark = savedTheme === "dark";
-  applyThemeUI(startDark);
-})();
-
-if (themeToggleBtn) {
-  themeToggleBtn.addEventListener("click", () => {
-    const willBeDark =
-      !document.documentElement.classList.contains("dark") &&
-      !document.body.classList.contains("dark-mode");
-    applyThemeUI(willBeDark);
-  });
+  applyThemeUI(savedTheme === "dark");
+  if (themeToggleBtn && !themeToggleBtn.dataset.bound) {
+    themeToggleBtn.dataset.bound = "1";
+    themeToggleBtn.addEventListener("click", () => {
+      const willBeDark =
+        !document.documentElement.classList.contains("dark") &&
+        !document.body.classList.contains("dark-mode");
+      applyThemeUI(willBeDark);
+    });
+  }
 }
 
 // =======================================================
-// ✅ OCULTAR ABA "EMISSÃO" NO SERVIDOR (MOSTRA SÓ LOCALHOST)
-// - Mantém visível em: localhost / 127.0.0.1 / ::1
-// - Remove botão + painel em produção
+// 5) Ocultar aba emissão no servidor (mantive)
 // =======================================================
-function isLocalhostHost() {
-  const h = String(window.location.hostname || "").toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "::1";
-}
-
-(function hideEmissaoTabInProd() {
+function hideEmissaoTabInProd() {
   if (isLocalhostHost()) return;
 
-  // remove botão da aba
   const emissaoBtn = document.querySelector('.tab-btn[data-tab="emissao"]');
   if (emissaoBtn) emissaoBtn.remove();
 
-  // remove painel
-  const emissaoPanel = document.getElementById("tab-emissao");
+  const emissaoPanel = $("tab-emissao");
   if (emissaoPanel) emissaoPanel.remove();
+}
 
-  // se por algum motivo a URL tinha hash/estado apontando emissao, garante download
-  // (isso evita ficar “sem tela” caso algo tente ativar emissao)
-  try {
-    const active = document.querySelector('.tab-btn.border-slate-900[data-tab="emissao"]');
-    if (active) active.classList.remove("border-slate-900");
-  } catch {}
-})();
+// =======================================================
+// 6) Tabs
+// =======================================================
+function initTabs() {
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const tabPanels = document.querySelectorAll(".tab-panel");
 
-// ---------------------------
-// Tabs
-// ---------------------------
-const tabButtons = document.querySelectorAll(".tab-btn");
-const tabPanels = document.querySelectorAll(".tab-panel");
+  function activateTab(tabName) {
+    if (tabName === "emissao" && !isLocalhostHost()) tabName = "download";
 
-function activateTab(tabName) {
-  // ✅ se alguém chamar activateTab("emissao") em produção, cai para download
-  if (tabName === "emissao" && !isLocalhostHost()) tabName = "download";
+    tabButtons.forEach((btn) => {
+      const isActive = btn.dataset.tab === tabName;
+      btn.classList.toggle("border-slate-900", isActive);
+      btn.classList.toggle("text-slate-900", isActive);
+      btn.classList.toggle("bg-slate-100", isActive);
+    });
 
-  tabButtons.forEach((btn) => {
-    const isActive = btn.dataset.tab === tabName;
-    btn.classList.toggle("border-slate-900", isActive);
-    btn.classList.toggle("text-slate-900", isActive);
-    btn.classList.toggle("bg-slate-100", isActive);
-  });
+    tabPanels.forEach((panel) => {
+      panel.classList.toggle("hidden", panel.id !== `tab-${tabName}`);
+    });
+  }
 
-  tabPanels.forEach((panel) => {
-    panel.classList.toggle("hidden", panel.id !== `tab-${tabName}`);
+  if (tabButtons.length) {
+    activateTab(isLocalhostHost() ? "download" : "download");
+
+    tabButtons.forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    });
+  }
+}
+
+// =======================================================
+// 7) Remover duplicações de títulos/subtítulos nas páginas
+// =======================================================
+function removeDuplicateHeadings() {
+  const seen = new Set();
+
+  const candidates = Array.from(document.querySelectorAll("h1, h2, p"))
+    .filter((el) => {
+      const t = (el.textContent || "").trim();
+      if (!t) return false;
+      return t.length <= 80;
+    });
+
+  candidates.forEach((el) => {
+    const t = (el.textContent || "").trim().replace(/\s+/g, " ");
+    const key = `${el.tagName}:${t}`;
+    if (seen.has(key)) {
+      el.remove();
+    } else {
+      seen.add(key);
+    }
   });
 }
 
-activateTab("download");
-
-tabButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    activateTab(btn.dataset.tab);
-  });
-});
-
-// ---------------------------
-// Logs helpers
-// ---------------------------
-const logsDownload = document.getElementById("logsDownload");
-const logsLote = document.getElementById("logsLote");
+// =======================================================
+// 8) Logs helpers
+// =======================================================
+const logsDownload = $("logsDownload");
+const logsLote = $("logsLote");
 
 function addLog(element, message) {
   if (!element) return;
@@ -775,9 +812,6 @@ function clearLogs(element) {
   element.innerHTML = "";
 }
 
-// ---------------------------
-// esconder UI de caminho (se existir)
-// ---------------------------
 function hideServerPathUI() {
   const idsToHide = [
     "serverPathManual",
@@ -787,7 +821,7 @@ function hideServerPathUI() {
   ];
 
   idsToHide.forEach((id) => {
-    const el = document.getElementById(id);
+    const el = $(id);
     if (!el) return;
 
     el.style.display = "none";
@@ -804,14 +838,8 @@ function hideServerPathUI() {
   });
 }
 
-hideServerPathUI();
-
-// ---------------------------
-// baixar ZIP automaticamente
-// ---------------------------
 function triggerZipDownload(zipUrl) {
   if (!zipUrl) return;
-
   const a = document.createElement("a");
   a.href = zipUrl;
   a.download = "";
@@ -820,19 +848,19 @@ function triggerZipDownload(zipUrl) {
   a.remove();
 }
 
-// ---------------------------
-// ✅ leitura de "tipos"
-// ---------------------------
+// =======================================================
+// 9) Tipos/Período (mantive sua lógica)
+// =======================================================
 function getSelectedTipos(prefix = "") {
   const idEmit = `${prefix}TipoEmitidas`;
   const idRec = `${prefix}TipoRecebidas`;
   const idCan = `${prefix}TipoCanceladas`;
   const idAll = `${prefix}TipoTodas`;
 
-  const elEmit = document.getElementById(idEmit);
-  const elRec = document.getElementById(idRec);
-  const elCan = document.getElementById(idCan);
-  const elAll = document.getElementById(idAll);
+  const elEmit = $(idEmit);
+  const elRec = $(idRec);
+  const elCan = $(idCan);
+  const elAll = $(idAll);
 
   const hasNewUI = !!(elEmit || elRec || elCan || elAll);
 
@@ -848,9 +876,7 @@ function getSelectedTipos(prefix = "") {
   }
 
   const radioName = prefix ? "loteTipoNota" : "tipoNota";
-  const tipoNotaRadio = document.querySelector(
-    `input[name='${radioName}']:checked`
-  );
+  const tipoNotaRadio = document.querySelector(`input[name='${radioName}']:checked`);
   const tipoNota = tipoNotaRadio ? tipoNotaRadio.value : "emitidas";
 
   if (String(tipoNota).toLowerCase() === "todas") {
@@ -861,12 +887,14 @@ function getSelectedTipos(prefix = "") {
 }
 
 function wireTodasCheckbox(prefix = "") {
-  const elAll = document.getElementById(`${prefix}TipoTodas`);
-  const elEmit = document.getElementById(`${prefix}TipoEmitidas`);
-  const elRec = document.getElementById(`${prefix}TipoRecebidas`);
-  const elCan = document.getElementById(`${prefix}TipoCanceladas`);
+  const elAll = $(`${prefix}TipoTodas`);
+  const elEmit = $(`${prefix}TipoEmitidas`);
+  const elRec = $(`${prefix}TipoRecebidas`);
+  const elCan = $(`${prefix}TipoCanceladas`);
 
   if (!elAll || (!elEmit && !elRec && !elCan)) return;
+  if (elAll.dataset.bound) return;
+  elAll.dataset.bound = "1";
 
   elAll.addEventListener("change", () => {
     const v = elAll.checked;
@@ -885,18 +913,14 @@ function wireTodasCheckbox(prefix = "") {
   };
 
   [elEmit, elRec, elCan].filter(Boolean).forEach((el) => {
+    if (el.dataset.bound) return;
+    el.dataset.bound = "1";
     el.addEventListener("change", refreshAll);
   });
 
   refreshAll();
 }
 
-wireTodasCheckbox("");
-wireTodasCheckbox("lote");
-
-// ---------------------------
-// validação/auto-correção de período
-// ---------------------------
 function parseISODateInput(v) {
   if (!v) return null;
   const parts = String(v).split("-");
@@ -909,8 +933,8 @@ function parseISODateInput(v) {
 }
 
 function maybeSwapPeriodoInUI({ dataInicialId, dataFinalId, logsEl }) {
-  const diEl = document.getElementById(dataInicialId);
-  const dfEl = document.getElementById(dataFinalId);
+  const diEl = $(dataInicialId);
+  const dfEl = $(dataFinalId);
   if (!diEl || !dfEl) return;
 
   const di = parseISODateInput(diEl.value);
@@ -921,176 +945,12 @@ function maybeSwapPeriodoInUI({ dataInicialId, dataFinalId, logsEl }) {
   if (di.getTime() > df.getTime()) {
     addLog(
       logsEl,
-      "[AVISO] Período invertido detectado (Data inicial > Data final). Corrigindo automaticamente (trocando as datas)."
+      "[AVISO] Período invertido (Data inicial > Data final). Corrigindo automaticamente (trocando as datas)."
     );
     const tmp = diEl.value;
     diEl.value = dfEl.value;
     dfEl.value = tmp;
   }
-}
-
-// ---------------------------
-// Helper: pegar config atual de download
-// ---------------------------
-function getDownloadConfig() {
-  const dataInicialEl = document.getElementById("dataInicial");
-  const dataFinalEl = document.getElementById("dataFinal");
-  const baixarXmlEl = document.getElementById("baixarXml");
-  const baixarPdfEl = document.getElementById("baixarPdf");
-  const pastaDestinoEl = document.getElementById("pastaDestino");
-
-  const manualLoginEl = document.getElementById("manualLoginPortal");
-  const manualSenhaEl = document.getElementById("manualSenhaPortal");
-
-  const processarTipos = getSelectedTipos("");
-
-  const tipoNota = processarTipos[0] || "emitidas";
-
-  return {
-    dataInicial: dataInicialEl ? dataInicialEl.value || null : null,
-    dataFinal: dataFinalEl ? dataFinalEl.value || null : null,
-
-    tipoNota,
-    processarTipos,
-
-    baixarXml: !!(baixarXmlEl && baixarXmlEl.checked),
-    baixarPdf: !!(baixarPdfEl && baixarPdfEl.checked),
-
-    pastaDestino:
-      pastaDestinoEl && pastaDestinoEl.value ? pastaDestinoEl.value : "downloads",
-    login:
-      manualLoginEl && manualLoginEl.value.trim()
-        ? manualLoginEl.value.trim()
-        : null,
-    senha: manualSenhaEl && manualSenhaEl.value ? manualSenhaEl.value : null,
-  };
-}
-
-// ---------------------------
-// Sincronizar campos do LOTE -> blocos principais
-// ---------------------------
-const loteDataInicialEl = document.getElementById("loteDataInicial");
-const loteDataFinalEl = document.getElementById("loteDataFinal");
-const dataInicialEl = document.getElementById("dataInicial");
-const dataFinalEl = document.getElementById("dataFinal");
-
-const loteBaixarXmlEl = document.getElementById("loteBaixarXml");
-const loteBaixarPdfEl = document.getElementById("loteBaixarPdf");
-
-const pastaDestinoInput = document.getElementById("pastaDestino");
-const lotePastaDestinoInput = document.getElementById("lotePastaDestino");
-const loteSelecionarPastaBtn = document.getElementById("loteSelecionarPastaBtn");
-
-function syncLotePeriodoToMain() {
-  if (loteDataInicialEl && dataInicialEl) {
-    dataInicialEl.value = loteDataInicialEl.value;
-  }
-  if (loteDataFinalEl && dataFinalEl) {
-    dataFinalEl.value = loteDataFinalEl.value;
-  }
-}
-
-function syncLoteFormatosToMain() {
-  const mainXml = document.getElementById("baixarXml");
-  const mainPdf = document.getElementById("baixarPdf");
-
-  if (loteBaixarXmlEl && mainXml) {
-    mainXml.checked = loteBaixarXmlEl.checked;
-  }
-  if (loteBaixarPdfEl && mainPdf) {
-    mainPdf.checked = loteBaixarPdfEl.checked;
-  }
-}
-
-if (loteDataInicialEl) {
-  loteDataInicialEl.addEventListener("change", syncLotePeriodoToMain);
-}
-if (loteDataFinalEl) {
-  loteDataFinalEl.addEventListener("change", syncLotePeriodoToMain);
-}
-
-if (loteBaixarXmlEl) {
-  loteBaixarXmlEl.addEventListener("change", syncLoteFormatosToMain);
-}
-if (loteBaixarPdfEl) {
-  loteBaixarPdfEl.addEventListener("change", syncLoteFormatosToMain);
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  if (dataInicialEl && loteDataInicialEl) {
-    loteDataInicialEl.value = dataInicialEl.value;
-  }
-  if (dataFinalEl && loteDataFinalEl) {
-    loteDataFinalEl.value = dataFinalEl.value;
-  }
-
-  const mainXml = document.getElementById("baixarXml");
-  const mainPdf = document.getElementById("baixarPdf");
-
-  if (mainXml && loteBaixarXmlEl) {
-    loteBaixarXmlEl.checked = mainXml.checked;
-  }
-  if (mainPdf && loteBaixarPdfEl) {
-    loteBaixarPdfEl.checked = mainPdf.checked;
-  }
-
-  if (pastaDestinoInput && lotePastaDestinoInput) {
-    lotePastaDestinoInput.value = pastaDestinoInput.value || "downloads";
-  }
-
-  hideServerPathUI();
-});
-
-// ---------------------------
-// Botões
-// ---------------------------
-const abrirNavegadorBtn = document.getElementById("abrirNavegadorBtn");
-if (abrirNavegadorBtn) {
-  abrirNavegadorBtn.addEventListener("click", () => {
-    const portalUrl =
-      "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2FEmissorNacional";
-    window.open(portalUrl, "_blank", "noopener");
-
-    clearLogs(logsDownload);
-    addLog(
-      logsDownload,
-      "[INFO] Portal da NFS-e aberto em uma nova aba. Faça o login e acompanhe o robô."
-    );
-  });
-}
-
-const selecionarPastaBtn = document.getElementById("selecionarPastaBtn");
-
-if (selecionarPastaBtn && pastaDestinoInput) {
-  selecionarPastaBtn.addEventListener("click", () => {
-    const atual = pastaDestinoInput.value || "downloads";
-    const resposta = window.prompt(
-      "Informe o nome da pasta de destino no servidor (ex: downloads):",
-      atual
-    );
-    if (resposta && resposta.trim()) {
-      pastaDestinoInput.value = resposta.trim();
-      if (lotePastaDestinoInput) {
-        lotePastaDestinoInput.value = resposta.trim();
-      }
-    }
-  });
-}
-
-if (loteSelecionarPastaBtn && lotePastaDestinoInput) {
-  loteSelecionarPastaBtn.addEventListener("click", () => {
-    const atual =
-      lotePastaDestinoInput.value ||
-      (pastaDestinoInput ? pastaDestinoInput.value : "downloads") ||
-      "downloads";
-    const resposta = window.prompt(
-      "Informe o nome da pasta de destino no servidor para o LOTE (ex: downloads):",
-      atual
-    );
-    if (resposta && resposta.trim()) {
-      lotePastaDestinoInput.value = resposta.trim();
-    }
-  });
 }
 
 function validatePeriodo(config, logsEl) {
@@ -1105,181 +965,357 @@ function validatePeriodo(config, logsEl) {
   }
 
   if (!Array.isArray(config.processarTipos) || config.processarTipos.length === 0) {
-    addLog(
-      logsEl,
-      "[ERRO] Selecione pelo menos um tipo de nota (Emitidas/Recebidas/Canceladas)."
-    );
+    addLog(logsEl, "[ERRO] Selecione pelo menos um tipo (Emitidas/Recebidas/Canceladas).");
     return false;
   }
 
   const di = parseISODateInput(config.dataInicial);
   const df = parseISODateInput(config.dataFinal);
   if (di && df && di.getTime() > df.getTime()) {
-    addLog(logsEl, "[ERRO] Período inválido: Data inicial está maior que Data final.");
+    addLog(logsEl, "[ERRO] Período inválido: Data inicial > Data final.");
     return false;
   }
 
   return true;
 }
 
-const iniciarDownloadBtn = document.getElementById("iniciarDownloadBtn");
-if (iniciarDownloadBtn) {
-  iniciarDownloadBtn.addEventListener("click", async () => {
-    clearLogs(logsDownload);
+// =======================================================
+// ✅ 9.5) CAPTURA INDIVIDUAL — UI Base44 (APENAS FRONT)
+//     - substitui placeholder pela estrutura igual ao Base44
+//     - mantém IDs que o código já usa (não quebra lógica)
+// =======================================================
+function findCaptureIndividualMount() {
+  // opção 1: um mount explícito (se você quiser adicionar depois)
+  const byId = $("captureIndividualMount");
+  if (byId) return byId;
 
-    maybeSwapPeriodoInUI({
-      dataInicialId: "dataInicial",
-      dataFinalId: "dataFinal",
-      logsEl: logsDownload,
-    });
+  // opção 2: procurar pelo texto do placeholder que aparece na tua tela
+  const needle = "(Tela placeholder)";
+  const all = Array.from(document.querySelectorAll("div, section, main, article, p"));
+  const hit = all.find((el) => (el.textContent || "").includes(needle));
+  if (!hit) return null;
 
-    const config = getDownloadConfig();
-
-    if (!validatePeriodo(config, logsDownload)) return;
-
-    if (!config.login || !config.senha) {
-      addLog(
-        logsDownload,
-        "[ERRO] Informe o CNPJ/Login e a Senha do portal antes de iniciar o download manual."
-      );
-      return;
-    }
-
-    addLog(logsDownload, "[INFO] Enviando requisição para o robô...");
-
-    try {
-      const res = await fetch("/api/nf/manual", {
-        method: "POST",
-        headers: apiHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(config),
-      });
-
-      if (!res.ok) {
-        addLog(logsDownload, `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`);
-        const txt = await res.text().catch(() => "");
-        if (txt) addLog(logsDownload, txt);
-        return;
-      }
-
-      const data = await res.json();
-
-      if (!data.success) {
-        addLog(logsDownload, "[ERRO] O robô não conseguiu concluir.");
-        if (data.error) addLog(logsDownload, `Detalhe: ${data.error}`);
-        return;
-      }
-
-      if (Array.isArray(data.logs) && data.logs.length > 0) {
-        data.logs.forEach((msg) => addLog(logsDownload, msg));
-      } else {
-        addLog(logsDownload, "[OK] Concluído (sem logs detalhados).");
-      }
-
-      if (data.downloadZipUrl) {
-        addLog(logsDownload, `[OK] ZIP gerado. Baixando: ${data.downloadZipUrl}`);
-        triggerZipDownload(data.downloadZipUrl);
-      } else {
-        addLog(logsDownload, "[AVISO] Nenhum ZIP retornado.");
-      }
-
-      hideServerPathUI();
-    } catch (err) {
-      console.error(err);
-      addLog(logsDownload, "[ERRO] Erro inesperado ao comunicar com o servidor.");
-    }
-  });
+  // pega um container “bom” pra trocar
+  return hit.closest("section") || hit.closest("main") || hit.parentElement || hit;
 }
 
-const baixarTudoBtn = document.getElementById("baixarTudoBtn");
-if (baixarTudoBtn) {
-  baixarTudoBtn.addEventListener("click", async () => {
-    clearLogs(logsLote);
+function ensureCaptureIndividualBase44UI() {
+  const mount = findCaptureIndividualMount();
+  if (!mount) return false;
 
-    maybeSwapPeriodoInUI({
-      dataInicialId: "loteDataInicial",
-      dataFinalId: "loteDataFinal",
-      logsEl: logsLote,
-    });
+  // evita re-render
+  if ($("captureIndividualCard")) return true;
 
-    syncLotePeriodoToMain();
-    syncLoteFormatosToMain();
+  mount.innerHTML = `
+    <div id="captureIndividualCard" class="max-w-3xl">
+      <div class="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-7 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+        <div class="space-y-1">
+          <div class="text-xs font-semibold tracking-widest text-white/60">EMPRESA</div>
+          <div class="relative">
+            <select id="empresaSelect"
+              class="w-full appearance-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 outline-none focus:border-white/20">
+              <option value="">Selecione a empresa</option>
+            </select>
+            <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/60">▾</div>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs text-white/45"></div>
+            <button id="btnOpenCadastroEmpresa" type="button"
+              class="hidden text-xs text-white/70 hover:text-white underline underline-offset-4">
+              Cadastrar empresa
+            </button>
+          </div>
+        </div>
 
-    if (lotePastaDestinoInput && pastaDestinoInput) {
-      pastaDestinoInput.value =
-        lotePastaDestinoInput.value && lotePastaDestinoInput.value.trim()
-          ? lotePastaDestinoInput.value.trim()
-          : "downloads";
-    }
+        <div class="mt-6">
+          <div class="text-xs font-semibold tracking-widest text-white/60">PERÍODO (MÁX. 30 DIAS)</div>
+          <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label class="block">
+              <div class="text-xs text-white/60 mb-2">Data Início</div>
+              <input id="dataInicial" type="date"
+                class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 outline-none focus:border-white/20" />
+            </label>
 
-    const config = getDownloadConfig();
+            <label class="block">
+              <div class="text-xs text-white/60 mb-2">Data Fim</div>
+              <input id="dataFinal" type="date"
+                class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 outline-none focus:border-white/20" />
+            </label>
+          </div>
+        </div>
 
-    if (loteBaixarXmlEl) config.baixarXml = !!loteBaixarXmlEl.checked;
-    if (loteBaixarPdfEl) config.baixarPdf = !!loteBaixarPdfEl.checked;
+        <div class="mt-6">
+          <div class="text-xs font-semibold tracking-widest text-white/60">TIPOS DE NOTA</div>
 
-    const tiposLote = getSelectedTipos("lote");
-    config.processarTipos = tiposLote;
-    config.tipoNota = tiposLote[0] || "emitidas";
+          <div class="mt-3 flex flex-wrap gap-4 text-sm text-white/80">
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input id="TipoRecebidas" type="checkbox" class="h-4 w-4 rounded border-white/20 bg-white/10" checked />
+              Recebidas
+            </label>
 
-    if (loteDataInicialEl && loteDataInicialEl.value) config.dataInicial = loteDataInicialEl.value;
-    if (loteDataFinalEl && loteDataFinalEl.value) config.dataFinal = loteDataFinalEl.value;
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input id="TipoEmitidas" type="checkbox" class="h-4 w-4 rounded border-white/20 bg-white/10" checked />
+              Emitidas
+            </label>
 
-    if (lotePastaDestinoInput && lotePastaDestinoInput.value.trim()) {
-      config.pastaDestino = lotePastaDestinoInput.value.trim();
-    }
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input id="TipoCanceladas" type="checkbox" class="h-4 w-4 rounded border-white/20 bg-white/10" checked />
+              Canceladas
+            </label>
 
-    if (!validatePeriodo(config, logsLote)) return;
+            <!-- opcional: 'todas' invisível (pra wireTodasCheckbox não quebrar se existir em outros lugares) -->
+            <input id="TipoTodas" type="checkbox" class="hidden" />
+          </div>
+        </div>
 
-    addLog(logsLote, "[INFO] Enviando requisição para execução em lote...");
+        <div class="mt-6">
+          <div class="text-xs font-semibold tracking-widest text-white/60">FORMATO</div>
+          <div class="mt-3 relative">
+            <select id="formatoDownload"
+              class="w-full appearance-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 outline-none focus:border-white/20">
+              <option value="pdf+xml" selected>PDF + XML</option>
+              <option value="pdf">Somente PDF</option>
+              <option value="xml">Somente XML</option>
+            </select>
+            <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/60">▾</div>
+          </div>
+        </div>
 
-    try {
-      const res = await fetch("/api/nf/lote", {
-        method: "POST",
-        headers: apiHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(config),
-      });
+        <!-- mantém compatibilidade com sua lógica atual -->
+        <div class="hidden">
+          <input id="manualLoginPortal" />
+          <input id="manualSenhaPortal" type="password" />
+          <input id="pastaDestino" value="downloads" />
+          <input id="baixarPdf" type="checkbox" checked />
+          <input id="baixarXml" type="checkbox" checked />
+        </div>
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        addLog(logsLote, `[ERRO] Falha na requisição: ${res.status} ${res.statusText}`);
-        if (txt) addLog(logsLote, `Detalhe: ${txt}`);
-        return;
+        <button id="iniciarDownloadBtn" type="button"
+          class="mt-8 w-full rounded-xl bg-indigo-600/40 hover:bg-indigo-600/50 border border-white/10 px-4 py-3 text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span aria-hidden="true">⤓</span>
+          Iniciar Captura
+        </button>
+
+        <div id="logsDownload" class="mt-4 text-xs text-white/70 space-y-1 max-h-40 overflow-auto"></div>
+      </div>
+    </div>
+  `;
+
+  // bind formato -> espelha em baixarPdf/baixarXml (mantém backend igual)
+  const formatoEl = $("formatoDownload");
+  const pdfEl = $("baixarPdf");
+  const xmlEl = $("baixarXml");
+  if (formatoEl && pdfEl && xmlEl && !formatoEl.dataset.bound) {
+    formatoEl.dataset.bound = "1";
+    const apply = () => {
+      const v = (formatoEl.value || "pdf+xml").toLowerCase();
+      if (v === "pdf+xml") {
+        pdfEl.checked = true;
+        xmlEl.checked = true;
+      } else if (v === "pdf") {
+        pdfEl.checked = true;
+        xmlEl.checked = false;
+      } else if (v === "xml") {
+        pdfEl.checked = false;
+        xmlEl.checked = true;
       }
+    };
+    formatoEl.addEventListener("change", apply);
+    apply();
+  }
 
-      const data = await res.json();
-
-      if (!data.success) {
-        addLog(logsLote, "[ERRO] O robô não conseguiu concluir o lote.");
-        if (data.error) addLog(logsLote, `Detalhe: ${data.error}`);
-        return;
-      }
-
-      if (Array.isArray(data.logs) && data.logs.length > 0) {
-        data.logs.forEach((msg) => addLog(logsLote, msg));
-      } else {
-        addLog(logsLote, "[OK] Lote concluído (sem logs detalhados).");
-      }
-
-      if (data.downloadZipUrl) {
-        addLog(logsLote, `[OK] ZIP do lote gerado. Baixando: ${data.downloadZipUrl}`);
-        triggerZipDownload(data.downloadZipUrl);
-      } else {
-        addLog(logsLote, "[AVISO] Nenhum ZIP retornado.");
-      }
-
-      hideServerPathUI();
-    } catch (err) {
-      console.error(err);
-      addLog(logsLote, "[ERRO] Erro inesperado ao comunicar com o servidor.");
-    }
-  });
+  return true;
 }
 
-// ---------------------------
-// Empresas (vindas da API)
-// ---------------------------
-const empresasTableBody = document.getElementById("empresasTableBody");
-const removerEmpresaBtn = document.getElementById("removerEmpresaBtn");
+// =======================================================
+// 10) Captura Manual / Lote (corrigido: credentials include)
+// =======================================================
+function getDownloadConfig() {
+  const dataInicialEl = $("dataInicial");
+  const dataFinalEl = $("dataFinal");
+  const baixarXmlEl = $("baixarXml");
+  const baixarPdfEl = $("baixarPdf");
+  const pastaDestinoEl = $("pastaDestino");
 
+  const manualLoginEl = $("manualLoginPortal");
+  const manualSenhaEl = $("manualSenhaPortal");
+
+  const processarTipos = getSelectedTipos("");
+  const tipoNota = processarTipos[0] || "emitidas";
+
+  return {
+    dataInicial: dataInicialEl ? dataInicialEl.value || null : null,
+    dataFinal: dataFinalEl ? dataFinalEl.value || null : null,
+
+    tipoNota,
+    processarTipos,
+
+    baixarXml: !!(baixarXmlEl && baixarXmlEl.checked),
+    baixarPdf: !!(baixarPdfEl && baixarPdfEl.checked),
+
+    pastaDestino: pastaDestinoEl && pastaDestinoEl.value ? pastaDestinoEl.value : "downloads",
+    login: manualLoginEl && manualLoginEl.value.trim() ? manualLoginEl.value.trim() : null,
+    senha: manualSenhaEl && manualSenhaEl.value ? manualSenhaEl.value : null,
+  };
+}
+
+function initCaptureButtons() {
+  const iniciarDownloadBtn = $("iniciarDownloadBtn");
+  if (iniciarDownloadBtn && !iniciarDownloadBtn.dataset.bound) {
+    iniciarDownloadBtn.dataset.bound = "1";
+    iniciarDownloadBtn.addEventListener("click", async () => {
+      clearLogs(logsDownload);
+
+      maybeSwapPeriodoInUI({
+        dataInicialId: "dataInicial",
+        dataFinalId: "dataFinal",
+        logsEl: logsDownload,
+      });
+
+      const config = getDownloadConfig();
+      if (!validatePeriodo(config, logsDownload)) return;
+
+      if (!config.login || !config.senha) {
+        addLog(
+          logsDownload,
+          "[ERRO] A empresa selecionada não possui Login/Senha do Portal salvos. Cadastre isso na empresa para a captura funcionar."
+        );
+        return;
+      }
+
+      addLog(logsDownload, "[INFO] Enviando requisição para o robô...");
+
+      try {
+        const res = await fetch("/api/nf/manual", {
+          method: "POST",
+          credentials: "include",
+          headers: apiHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(config),
+        });
+
+        if (!res.ok) {
+          addLog(logsDownload, `[ERRO] Falha: ${res.status} ${res.statusText}`);
+          const txt = await res.text().catch(() => "");
+          if (txt) addLog(logsDownload, txt);
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!data.success) {
+          addLog(logsDownload, "[ERRO] O robô não conseguiu concluir.");
+          if (data.error) addLog(logsDownload, `Detalhe: ${data.error}`);
+          return;
+        }
+
+        if (Array.isArray(data.logs) && data.logs.length > 0) {
+          data.logs.forEach((msg) => addLog(logsDownload, msg));
+        } else {
+          addLog(logsDownload, "[OK] Concluído (sem logs detalhados).");
+        }
+
+        if (data.downloadZipUrl) {
+          addLog(logsDownload, `[OK] ZIP gerado. Baixando: ${data.downloadZipUrl}`);
+          triggerZipDownload(data.downloadZipUrl);
+        } else {
+          addLog(logsDownload, "[AVISO] Nenhum ZIP retornado.");
+        }
+
+        hideServerPathUI();
+      } catch (err) {
+        console.error(err);
+        addLog(logsDownload, "[ERRO] Erro inesperado ao comunicar com o servidor.");
+      }
+    });
+  }
+
+  const baixarTudoBtn = $("baixarTudoBtn");
+  if (baixarTudoBtn && !baixarTudoBtn.dataset.bound) {
+    baixarTudoBtn.dataset.bound = "1";
+    baixarTudoBtn.addEventListener("click", async () => {
+      clearLogs(logsLote);
+
+      maybeSwapPeriodoInUI({
+        dataInicialId: "loteDataInicial",
+        dataFinalId: "loteDataFinal",
+        logsEl: logsLote,
+      });
+
+      const config = getDownloadConfig();
+
+      // sobrescreve config com lote se existir
+      const loteDataInicialEl = $("loteDataInicial");
+      const loteDataFinalEl = $("loteDataFinal");
+      const loteBaixarXmlEl = $("loteBaixarXml");
+      const loteBaixarPdfEl = $("loteBaixarPdf");
+      const lotePastaDestinoInput = $("lotePastaDestino");
+
+      if (loteDataInicialEl && loteDataInicialEl.value) config.dataInicial = loteDataInicialEl.value;
+      if (loteDataFinalEl && loteDataFinalEl.value) config.dataFinal = loteDataFinalEl.value;
+
+      if (loteBaixarXmlEl) config.baixarXml = !!loteBaixarXmlEl.checked;
+      if (loteBaixarPdfEl) config.baixarPdf = !!loteBaixarPdfEl.checked;
+
+      const tiposLote = getSelectedTipos("lote");
+      config.processarTipos = tiposLote;
+      config.tipoNota = tiposLote[0] || "emitidas";
+
+      if (lotePastaDestinoInput && lotePastaDestinoInput.value.trim()) {
+        config.pastaDestino = lotePastaDestinoInput.value.trim();
+      }
+
+      if (!validatePeriodo(config, logsLote)) return;
+
+      addLog(logsLote, "[INFO] Enviando requisição para execução em lote...");
+
+      try {
+        const res = await fetch("/api/nf/lote", {
+          method: "POST",
+          credentials: "include",
+          headers: apiHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(config),
+        });
+
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          addLog(logsLote, `[ERRO] Falha: ${res.status} ${res.statusText}`);
+          if (txt) addLog(logsLote, `Detalhe: ${txt}`);
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!data.success) {
+          addLog(logsLote, "[ERRO] O robô não conseguiu concluir o lote.");
+          if (data.error) addLog(logsLote, `Detalhe: ${data.error}`);
+          return;
+        }
+
+        if (Array.isArray(data.logs) && data.logs.length > 0) {
+          data.logs.forEach((msg) => addLog(logsLote, msg));
+        } else {
+          addLog(logsLote, "[OK] Lote concluído (sem logs detalhados).");
+        }
+
+        if (data.downloadZipUrl) {
+          addLog(logsLote, `[OK] ZIP do lote gerado. Baixando: ${data.downloadZipUrl}`);
+          triggerZipDownload(data.downloadZipUrl);
+        } else {
+          addLog(logsLote, "[AVISO] Nenhum ZIP retornado.");
+        }
+
+        hideServerPathUI();
+      } catch (err) {
+        console.error(err);
+        addLog(logsLote, "[ERRO] Erro inesperado ao comunicar com o servidor.");
+      }
+    });
+  }
+}
+
+// =======================================================
+// 11) Empresas: suporta (A) tabela antiga e (B) cards novos
+// =======================================================
 let empresas = [];
 let empresaSelecionadaId = null;
 
@@ -1292,7 +1328,11 @@ function normalizeEmpresa(emp) {
   };
 }
 
-function renderEmpresas() {
+// ---- (A) Tabela antiga ----
+const empresasTableBody = $("empresasTableBody");
+const removerEmpresaBtn = $("removerEmpresaBtn");
+
+function renderEmpresasTabela() {
   if (!empresasTableBody) return;
 
   empresasTableBody.innerHTML = "";
@@ -1318,18 +1358,19 @@ function renderEmpresas() {
     tr.dataset.id = String(emp.id || "");
 
     tr.innerHTML = `
-      <td class="px-3 py-2 text-slate-600">${emp.id || "—"}</td>
-      <td class="px-3 py-2 text-slate-800">${emp.nome || "—"}</td>
-      <td class="px-3 py-2 text-slate-600">${emp.cnpj || "—"}</td>
+      <td class="px-3 py-2 text-slate-600">${escapeHtml(emp.id || "—")}</td>
+      <td class="px-3 py-2 text-slate-800">${escapeHtml(emp.nome || "—")}</td>
+      <td class="px-3 py-2 text-slate-600">${escapeHtml(emp.cnpj || "—")}</td>
     `;
 
     empresasTableBody.appendChild(tr);
   });
 }
 
-// ✅ Delegação de evento: seleção sempre funciona (mesmo após re-render)
-if (empresasTableBody && empresasTableBody.dataset._bound !== "1") {
+function bindTabelaSelect() {
+  if (!empresasTableBody || empresasTableBody.dataset._bound === "1") return;
   empresasTableBody.dataset._bound = "1";
+
   empresasTableBody.addEventListener("click", (ev) => {
     const tr = ev.target.closest("tr");
     if (!tr || !empresasTableBody.contains(tr)) return;
@@ -1348,11 +1389,206 @@ if (empresasTableBody && empresasTableBody.dataset._bound !== "1") {
   });
 }
 
+async function deleteEmpresaById(id) {
+  const ok = confirm("Deseja remover a empresa selecionada?");
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`/api/empresas/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: apiHeaders(),
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      console.error("Erro ao remover empresa:", res.status, res.statusText, txt);
+      addLog(logsLote, `[ERRO] Falha ao remover (HTTP ${res.status}).`);
+      if (txt) addLog(logsLote, txt);
+      return;
+    }
+
+    addLog(logsLote, "[OK] Empresa removida com sucesso.");
+    await loadEmpresasFromAPI();
+  } catch (err) {
+    console.error("Erro ao remover empresa:", err);
+    addLog(logsLote, "[ERRO] Erro inesperado ao remover empresa.");
+  }
+}
+
+function bindRemoverEmpresaTabela() {
+  if (!removerEmpresaBtn || removerEmpresaBtn.dataset.bound) return;
+  removerEmpresaBtn.dataset.bound = "1";
+
+  removerEmpresaBtn.addEventListener("click", async () => {
+    if (!empresaSelecionadaId) {
+      addLog(logsLote, "[AVISO] Selecione uma empresa na tabela antes de remover.");
+      return;
+    }
+    await deleteEmpresaById(empresaSelecionadaId);
+    empresaSelecionadaId = null;
+    removerEmpresaBtn.disabled = true;
+  });
+}
+
+// ---- (B) Cards novos ----
+const empresasCardsContainer =
+  $("empresasList") ||
+  $("empresasCards") ||
+  document.querySelector("[data-empresas-container]") ||
+  document.querySelector(".empresas-cards") ||
+  null;
+
+function renderEmpresasCards() {
+  if (!empresasCardsContainer) return;
+
+  const shouldRender =
+    empresasCardsContainer.hasAttribute("data-render-js") ||
+    empresasCardsContainer.children.length === 0;
+
+  if (!shouldRender) return;
+
+  empresasCardsContainer.innerHTML = "";
+
+  empresas.forEach((eRaw) => {
+    const e = normalizeEmpresa(eRaw);
+    const card = document.createElement("div");
+    card.className =
+      "rounded-2xl border border-white/10 bg-white/5 p-4 flex items-center justify-between";
+    card.dataset.empresaId = e.id;
+
+    card.innerHTML = `
+      <div>
+        <div class="text-sm font-semibold text-white">${escapeHtml(e.nome || "—")}</div>
+        <div class="text-xs text-white/60">${escapeHtml(e.cnpj || "")}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" data-action="edit-empresa" data-id="${escapeHtml(e.id)}"
+          class="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs">
+          Editar
+        </button>
+        <button type="button" data-action="delete-empresa" data-id="${escapeHtml(e.id)}"
+          class="px-3 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-white text-xs">
+          Excluir
+        </button>
+      </div>
+    `;
+
+    empresasCardsContainer.appendChild(card);
+  });
+}
+
+function bindCardsDelegation() {
+  if (!empresasCardsContainer) return;
+  if (empresasCardsContainer.dataset.bound === "1") return;
+  empresasCardsContainer.dataset.bound = "1";
+
+  empresasCardsContainer.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+
+    const action = btn.getAttribute("data-action") || "";
+    const id =
+      btn.getAttribute("data-id") ||
+      btn.closest("[data-empresa-id]")?.getAttribute("data-empresa-id");
+
+    const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+    const className = (btn.className || "").toLowerCase();
+
+    const isDelete =
+      action === "delete-empresa" ||
+      aria.includes("excluir") ||
+      aria.includes("remover") ||
+      className.includes("trash") ||
+      className.includes("delete");
+
+    if (isDelete && id) {
+      await deleteEmpresaById(id);
+      return;
+    }
+  });
+}
+
+// ✅ Select de empresa (Captura Individual Base44)
+function bindEmpresaSelectFillCreds() {
+  const sel = $("empresaSelect");
+  if (!sel || sel.dataset.bound) return;
+  sel.dataset.bound = "1";
+
+  sel.addEventListener("change", () => {
+    const v = (sel.value || "").trim();
+    const emp = empresas.find((x) => String(normalizeEmpresa(x).id) === String(v));
+    const raw = emp ? emp : null;
+
+    const loginEl = $("manualLoginPortal");
+    const senhaEl = $("manualSenhaPortal");
+
+    const login =
+      raw?.loginPortal ??
+      raw?.portalLogin ??
+      raw?.login ??
+      raw?.usuario ??
+      raw?.cnpj ??
+      null;
+
+    const senha =
+      raw?.senhaPortal ??
+      raw?.portalSenha ??
+      raw?.senha ??
+      raw?.password ??
+      null;
+
+    if (loginEl) loginEl.value = login ? String(login) : "";
+    if (senhaEl) senhaEl.value = senha ? String(senha) : "";
+
+    // log discreto (se existir)
+    const logEl = $("logsDownload");
+    if (logEl) {
+      clearLogs(logEl);
+      if (!v) {
+        addLog(logEl, "[INFO] Selecione uma empresa para carregar credenciais.");
+      } else if (!senha) {
+        addLog(logEl, "[AVISO] Empresa selecionada sem senha salva. Cadastre Login/Senha na empresa.");
+      } else {
+        addLog(logEl, "[OK] Empresa selecionada. Credenciais carregadas.");
+      }
+    }
+  });
+}
+
+function renderEmpresaSelectOptions() {
+  const sel = $("empresaSelect");
+  if (!sel) return;
+
+  const current = sel.value || "";
+  sel.innerHTML = `<option value="">Selecione a empresa</option>`;
+
+  empresas.forEach((empRaw) => {
+    const e = normalizeEmpresa(empRaw);
+    const opt = document.createElement("option");
+    opt.value = String(e.id || "");
+    opt.textContent = e.nome ? `${e.nome}` : `${e.cnpj || e.id || "Empresa"}`;
+    sel.appendChild(opt);
+  });
+
+  // tenta restaurar seleção
+  if (current) sel.value = current;
+
+  // se só tem 1 empresa, seleciona automático
+  if (!sel.value && empresas.length === 1) {
+    const only = normalizeEmpresa(empresas[0]);
+    sel.value = String(only.id || "");
+    sel.dispatchEvent(new Event("change"));
+  }
+}
+
+// ---- Carregar empresas ----
 async function loadEmpresasFromAPI() {
-  if (!empresasTableBody) return;
+  if (!empresasTableBody && !empresasCardsContainer && !$("empresaSelect")) return;
 
   try {
     const res = await fetch("/api/empresas", {
+      credentials: "include",
       headers: apiHeaders(),
     });
 
@@ -1361,127 +1597,177 @@ async function loadEmpresasFromAPI() {
       return;
     }
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     const list = Array.isArray(data) ? data : Array.isArray(data?.empresas) ? data.empresas : [];
 
     empresas = list;
     empresaSelecionadaId = null;
     if (removerEmpresaBtn) removerEmpresaBtn.disabled = true;
-    renderEmpresas();
+
+    renderEmpresasTabela();
+    renderEmpresasCards();
+
+    // ✅ atualiza dropdown da captura individual (se existir)
+    renderEmpresaSelectOptions();
+    bindEmpresaSelectFillCreds();
   } catch (err) {
     console.error("Erro ao carregar empresas:", err);
   }
 }
 
-loadEmpresasFromAPI();
+// ---- Criar empresa (mantive) ----
+async function createEmpresaFromUI() {
+  const nome = getValByIds(["nomeEmpresa", "nomeEmpresaModal", "empresaNome", "nome_da_empresa"]).trim();
+  const cnpj = getValByIds(["cnpjEmpresa", "cnpjEmpresaModal", "empresaCnpj", "cnpj"]).trim();
 
-const salvarEmpresaBtn = document.getElementById("salvarEmpresaBtn");
-if (salvarEmpresaBtn) {
-  salvarEmpresaBtn.addEventListener("click", async () => {
-    const nome = document.getElementById("nomeEmpresa").value.trim();
-    const cnpj = document.getElementById("cnpjEmpresa").value.trim();
-    const senhaPortalEl = document.getElementById("senhaPortal");
-    const senhaPortal = senhaPortalEl ? senhaPortalEl.value.trim() : "";
-    const feedback = document.getElementById("feedbackEmpresa");
+  const loginPortal = getValByIds(["loginPortal", "loginPortalEmpresa", "portalLogin", "empresaLoginPortal"]).trim();
+  const senhaPortal = getValByIds(["senhaPortal", "senhaPortalEmpresa", "portalSenha", "empresaSenhaPortal"]).trim();
 
-    if (!nome || !cnpj) {
+  const uf = getValByIds(["ufEmpresa", "uf", "empresaUF"]).trim();
+  const cidade = getValByIds(["cidadeEmpresa", "cidade", "empresaCidade"]).trim();
+  const regime = getValByIds(["regimeTributario", "regime", "empresaRegime"]).trim();
+  const tipoAuth = getValByIds(["tipoAutenticacao", "tipoAuth", "empresaTipoAuth"]).trim();
+
+  const feedback =
+    pickElByIds(["feedbackEmpresa", "empresaFeedback", "msgEmpresa"]) || null;
+
+  if (!nome || !cnpj) {
+    if (feedback) {
+      feedback.textContent = "Preencha nome e CNPJ para salvar.";
+      feedback.classList.remove("hidden");
+    }
+    return;
+  }
+
+  if (!senhaPortal && !loginPortal) {
+    if (feedback) {
+      feedback.textContent =
+        "Dica: preencha Login do Portal e Senha do Portal para a captura funcionar.";
+      feedback.classList.remove("hidden");
+    }
+  }
+
+  try {
+    const payload = {
+      nome,
+      cnpj,
+      loginPortal: loginPortal || null,
+      senhaPortal: senhaPortal || null,
+      uf: uf || null,
+      cidade: cidade || null,
+      regimeTributario: regime || null,
+      tipoAutenticacao: tipoAuth || null,
+    };
+
+    const res = await fetch("/api/empresas", {
+      method: "POST",
+      credentials: "include",
+      headers: apiHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok || json?.ok === false) {
+      const msg = json?.message || json?.error || "Erro ao salvar empresa no servidor.";
       if (feedback) {
-        feedback.textContent = "Preencha nome e CNPJ para salvar.";
+        feedback.textContent = msg;
         feedback.classList.remove("hidden");
-        feedback.classList.remove("text-emerald-600");
-        feedback.classList.add("text-rose-600");
       }
       return;
     }
 
-    try {
-      const res = await fetch("/api/empresas", {
-        method: "POST",
-        headers: apiHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ nome, cnpj, senhaPortal }),
+    if (feedback) {
+      feedback.textContent = "Empresa salva com sucesso.";
+      feedback.classList.remove("hidden");
+    }
+
+    ["nomeEmpresa", "nomeEmpresaModal", "empresaNome", "cnpjEmpresa", "cnpjEmpresaModal", "empresaCnpj",
+     "loginPortal", "loginPortalEmpresa", "portalLogin", "senhaPortal", "senhaPortalEmpresa", "portalSenha"]
+      .forEach((id) => {
+        const el = $(id);
+        if (el) el.value = "";
       });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        if (feedback) {
-          feedback.textContent = "Erro ao salvar empresa no servidor.";
-          feedback.classList.remove("hidden");
-          feedback.classList.remove("text-emerald-600");
-          feedback.classList.add("text-rose-600");
-        }
-        console.error("Salvar empresa falhou:", res.status, res.statusText, txt);
-        return;
-      }
-
-      const json = await res.json().catch(() => ({}));
-      const empresaCriada = (json && json.empresa) ? json.empresa : json;
-
-      if (!empresaCriada || empresaCriada.id == null) {
-        await loadEmpresasFromAPI();
-      } else {
-        empresas.push(empresaCriada);
-        renderEmpresas();
-      }
-
-      document.getElementById("nomeEmpresa").value = "";
-      document.getElementById("cnpjEmpresa").value = "";
-      if (senhaPortalEl) senhaPortalEl.value = "";
-
-      if (feedback) {
-        feedback.textContent = "Empresa salva com sucesso (armazenada no backend).";
-        feedback.classList.remove("hidden");
-        feedback.classList.remove("text-rose-600");
-        feedback.classList.add("text-emerald-600");
-      }
-    } catch (err) {
-      console.error("Erro ao salvar empresa:", err);
-      if (feedback) {
-        feedback.textContent = "Erro inesperado ao comunicar com o servidor.";
-        feedback.classList.remove("hidden");
-        feedback.classList.remove("text-emerald-600");
-        feedback.classList.add("text-rose-600");
-      }
+    await loadEmpresasFromAPI();
+  } catch (err) {
+    console.error("Erro ao salvar empresa:", err);
+    if (feedback) {
+      feedback.textContent = "Erro inesperado ao comunicar com o servidor.";
+      feedback.classList.remove("hidden");
     }
-  });
+  }
 }
 
-if (removerEmpresaBtn) {
-  removerEmpresaBtn.addEventListener("click", async () => {
-    if (!empresaSelecionadaId) {
-      addLog(logsLote, "[AVISO] Selecione uma empresa na tabela antes de remover.");
-      return;
-    }
+function bindCreateEmpresaButtons() {
+  const salvarEmpresaBtn = $("salvarEmpresaBtn");
+  if (salvarEmpresaBtn && !salvarEmpresaBtn.dataset.bound) {
+    salvarEmpresaBtn.dataset.bound = "1";
+    salvarEmpresaBtn.addEventListener("click", async () => {
+      await createEmpresaFromUI();
+    });
+  }
 
-    if (!confirm("Deseja remover a empresa selecionada?")) return;
+  const cadastrarBtn =
+    pickElByIds(["cadastrarEmpresaBtn", "btnCadastrarEmpresa", "empresaCadastrarBtn"]) ||
+    document.querySelector("button[type='button'][data-action='cadastrar-empresa']") ||
+    null;
 
-    try {
-      const res = await fetch(
-        `/api/empresas/${encodeURIComponent(empresaSelecionadaId)}`,
-        {
-          method: "DELETE",
-          headers: apiHeaders(),
-        }
-      );
+  if (cadastrarBtn && !cadastrarBtn.dataset.bound) {
+    cadastrarBtn.dataset.bound = "1";
+    cadastrarBtn.addEventListener("click", async () => {
+      await createEmpresaFromUI();
+    });
+  }
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        console.error("Erro ao remover empresa:", res.status, res.statusText, txt);
-        addLog(
-          logsLote,
-          `[ERRO] Falha ao remover (HTTP ${res.status}). Pode ser empresa de outro usuário (multi-tenant).`
-        );
-        if (txt) addLog(logsLote, txt);
-        return;
-      }
+  const form =
+    pickElByIds(["empresaForm", "formEmpresa", "cadastrarEmpresaForm"]) ||
+    document.querySelector("form[data-empresa-form]") ||
+    null;
 
-      empresaSelecionadaId = null;
-      removerEmpresaBtn.disabled = true;
-
-      await loadEmpresasFromAPI();
-      addLog(logsLote, "[OK] Empresa removida com sucesso.");
-    } catch (err) {
-      console.error("Erro ao remover empresa:", err);
-      addLog(logsLote, "[ERRO] Erro inesperado ao remover empresa.");
-    }
-  });
+  if (form && !form.dataset.bound) {
+    form.dataset.bound = "1";
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await createEmpresaFromUI();
+    });
+  }
 }
+
+// =======================================================
+// 12) Init geral
+// =======================================================
+async function initDashboard() {
+  const ok = await ensureLoggedUserOrRedirect();
+  if (!ok) return;
+
+  hideTopLogoutIfAny();
+  initTheme();
+  hideEmissaoTabInProd();
+  initTabs();
+
+  ensureUserMenuUI();
+
+  // ✅ monta UI Base44 da Captura Individual (se estiver nessa tela)
+  ensureCaptureIndividualBase44UI();
+
+  // tipos
+  wireTodasCheckbox("");
+  wireTodasCheckbox("lote");
+
+  // botões captura
+  initCaptureButtons();
+
+  // empresas
+  bindTabelaSelect();
+  bindRemoverEmpresaTabela();
+  bindCardsDelegation();
+  bindCreateEmpresaButtons();
+  await loadEmpresasFromAPI();
+
+  hideServerPathUI();
+  removeDuplicateHeadings();
+}
+
+document.addEventListener("DOMContentLoaded", initDashboard);
+

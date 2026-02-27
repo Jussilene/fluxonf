@@ -1,9 +1,15 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <title>IA NFSe - Login</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1220" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png?v=20260226a" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png?v=20260226a" />
+    <link rel="apple-touch-icon" href="/assets/icon-192.png?v=20260226a" />
+    <link rel="shortcut icon" type="image/png" href="/assets/icon-192.png?v=20260226a" />
 
     <!-- Tailwind via CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,12 +18,20 @@
       body {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
+        background:
+          radial-gradient(980px 420px at 8% -10%, rgba(59, 130, 246, 0.10), transparent 55%),
+          radial-gradient(900px 460px at 88% 8%, rgba(16, 24, 40, 0.10), transparent 58%),
+          #f8fafc;
       }
 
       /* Tema escuro baseado em preto/branco */
       body.dark-mode {
         background-color: #020617;
         color: #e5e7eb;
+        background:
+          radial-gradient(980px 430px at 8% -10%, rgba(59, 130, 246, 0.18), transparent 60%),
+          radial-gradient(900px 440px at 90% 2%, rgba(109, 94, 247, 0.14), transparent 62%),
+          #020617;
       }
 
       body.dark-mode .bg-white,
@@ -60,83 +74,111 @@
       body.dark-mode .hover\:bg-slate-100:hover {
         background-color: #020617 !important;
       }
+
+      .login-shell {
+        width: min(560px, 100%);
+      }
+
+      .login-title {
+        letter-spacing: -0.01em;
+      }
+
+      .login-card {
+        border-radius: 22px;
+        border: 1px solid #e2e8f0;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.09);
+      }
+
+      .login-note {
+        color: #64748b;
+      }
+
+      .login-brand-logo {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+        border-radius: 12px;
+        border: 1px solid #dbe3ef;
+        background: #ffffff;
+        padding: 6px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+      }
+
+      body.dark-mode .login-card {
+        background: rgba(2, 6, 23, 0.82);
+        border-color: #1e293b;
+        box-shadow: 0 22px 44px rgba(0, 0, 0, 0.52);
+      }
+
+      body.dark-mode .login-note {
+        color: #94a3b8;
+      }
+
+      body.dark-mode .login-brand-logo {
+        background: #0b1220;
+        border-color: #1e293b;
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.4);
+      }
     </style>
   </head>
 
   <body class="min-h-screen bg-slate-50">
-    <div class="min-h-screen flex flex-col items-center justify-center px-4">
-      <!-- Barra superior com logo + tema -->
-      <div class="w-full max-w-md flex items-center justify-between mb-6">
-        <div class="flex items-center gap-3">
-          <div class="leading-tight">
-            <div class="flex items-center gap-2">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Fluxo NF 
-              </p>
-
-              <!-- ✅ versão -->
-              <span
-                class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600"
-              >
-                v0.1.0
-              </span>
+    <div class="min-h-screen flex flex-col items-center justify-center px-4 py-8">
+      <div class="login-shell">
+        <div class="login-card p-7">
+          <div class="flex items-start justify-between gap-4 mb-6">
+            <div class="flex items-start gap-3 min-w-0">
+              <img
+                src="/assets/fluxonf-logo.png?v=20260226a"
+                alt="Fluxo NF"
+                class="login-brand-logo shrink-0"
+                onerror="this.style.display='none';"
+              />
+              <div class="leading-tight min-w-0">
+                <div class="flex items-center gap-2">
+                  <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Fluxo NF</p>
+                  <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600">v2.0.0</span>
+                </div>
+                <p class="text-sm text-slate-400 mt-1">Sistema de Captura e Organização de NFSe Emissor Nacional</p>
+              </div>
             </div>
 
-            <p class="text-sm text-slate-400">
-              Sistema de Captura e Organização de NFSe Emissor Nacional
-            </p>
+            <button
+              id="themeToggleBtnLogin"
+              type="button"
+              aria-label="Alternar tema"
+              aria-checked="false"
+              role="switch"
+              class="relative inline-flex items-center w-[74px] h-[34px] rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors shrink-0"
+            >
+              <span class="absolute inset-0 flex items-center justify-between px-2">
+                <span id="themeSunIconLogin" class="text-slate-700">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
+                    <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <span id="themeMoonIconLogin" class="text-slate-400">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </span>
+              <span
+                id="themeToggleKnobLogin"
+                class="absolute left-[3px] top-[3px] h-[28px] w-[28px] rounded-full bg-white border border-slate-200 shadow-sm transition-transform"
+              ></span>
+            </button>
           </div>
-        </div>
 
-        <!-- Switch de tema (1 botão) -->
-        <button
-          id="themeToggleBtnLogin"
-          type="button"
-          aria-label="Alternar tema"
-          aria-checked="false"
-          role="switch"
-          class="relative inline-flex items-center w-[74px] h-[34px] rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
-        >
-          <span class="absolute inset-0 flex items-center justify-between px-2">
-            <!-- Sol -->
-            <span id="themeSunIconLogin" class="text-slate-700">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
-                <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </span>
+          <div class="mb-6">
+            <h1 class="login-title text-4xl font-semibold text-slate-900">Acesse sua área segura</h1>
+            <p class="text-base text-slate-500 mt-2">Use seu e-mail para entrar no painel.</p>
+          </div>
 
-            <!-- Lua -->
-            <span id="themeMoonIconLogin" class="text-slate-400">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-              </svg>
-            </span>
-          </span>
-
-          <!-- Knob -->
-          <span
-            id="themeToggleKnobLogin"
-            class="absolute left-[3px] top-[3px] h-[28px] w-[28px] rounded-full bg-white border border-slate-200 shadow-sm transition-transform"
-          ></span>
-        </button>
-      </div>
-
-      <div class="max-w-md w-full">
-        <div class="mb-5">
-          <h1 class="text-2xl font-semibold text-slate-900">
-            Acesse sua área segura
-          </h1>
-          <p class="text-sm text-slate-500 mt-1">
-            Use seu e-mail para entrar no painel.
-          </p>
-        </div>
-
-        <div
-          class="bg-white shadow-xl shadow-slate-900/5 rounded-2xl p-6 border border-slate-100"
-        >
           <form id="loginForm" class="space-y-4">
-            <div class="space-y-1.5">
+            <div class="space-y-2">
               <label for="email" class="block text-sm font-medium text-slate-700">
                 E-mail 
               </label>
@@ -144,24 +186,24 @@
                 id="email"
                 type="email"
                 required
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                class="mt-1 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                 placeholder="ex: adm@empresa.com.br"
                 autocomplete="username"
               />
             </div>
 
-            <div class="space-y-1.5">
+            <div class="space-y-2">
               <label for="password" class="block text-sm font-medium text-slate-700">
                 Senha
               </label>
 
-              <!-- Campo senha com botão olho -->
+              <!-- Campo senha com botÃ£o olho -->
               <div class="relative">
                 <input
                   id="password"
                   type="password"
                   required
-                  class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+                  class="mt-1 w-full rounded-xl border border-slate-200 px-3.5 py-3 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
                   placeholder="Digite sua senha"
                   autocomplete="current-password"
                 />
@@ -171,7 +213,7 @@
                   type="button"
                   aria-label="Mostrar senha"
                   title="Mostrar senha"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center"
                 >
                   <!-- olho fechado (default) -->
                   <span id="eyeClosedIcon" aria-hidden="true">
@@ -194,7 +236,7 @@
               </div>
 
               <!-- Lembrar + Esqueci -->
-              <div class="mt-2 flex items-center justify-between">
+              <div class="mt-2.5 flex items-center justify-between">
                 <label class="inline-flex items-center gap-2 text-xs text-slate-600 select-none">
                   <input
                     id="rememberAccess"
@@ -218,21 +260,20 @@
               id="loginError"
               class="hidden text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2"
             >
-              E-mail ou senha inválidos. Tente novamente.
+              E-mail ou senha invÃ¡lidos. Tente novamente.
             </div>
 
             <button
               type="submit"
-              class="bg-primary-btn w-full inline-flex justify-center items-center gap-2 rounded-lg bg-slate-900 text-white text-sm font-medium px-4 py-2.5 hover:bg-black transition-colors focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 focus:ring-offset-slate-50"
+              class="bg-primary-btn w-full inline-flex justify-center items-center gap-2 rounded-xl bg-slate-900 text-white text-base font-semibold px-5 py-3 hover:bg-black transition-colors focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 focus:ring-offset-slate-50"
             >
               Entrar no painel
             </button>
           </form>
+          <p class="login-note mt-5 text-[11px] text-center">
+            Aplicamos boas práticas de segurança para proteger suas informações.
+          </p>
         </div>
-
-        <p class="mt-4 text-[11px] text-slate-400 text-center">
-          Aplicamos boas práticas de segurança para proteger suas informações.
-        </p>
       </div>
     </div>
 
@@ -266,7 +307,7 @@
         <div class="mt-4 space-y-3">
           <div class="text-xs text-slate-600">
             Informe seu e-mail abaixo e clique em <span class="font-semibold">Enviar e-mail</span>.
-            Isso abrirá o aplicativo de e-mail com a mensagem pronta.
+            Isso abrirÃ¡ o aplicativo de e-mail com a mensagem pronta.
           </div>
 
           <div>
@@ -305,7 +346,7 @@
     </div>
 
     <script>
-      // Tema (login) - mantém a mesma chave nfseTheme
+      // Tema (login) - mantÃ©m a mesma chave nfseTheme
       (function () {
         const btn = document.getElementById("themeToggleBtnLogin");
         const knob = document.getElementById("themeToggleKnobLogin");
@@ -351,3 +392,4 @@
     <script src="/js/login.js"></script>
   </body>
 </html>
+
